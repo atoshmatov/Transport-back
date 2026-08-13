@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: transport-observer-backend
+  profiles:
+    active: dev
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      # Incident evidence photos (POST /api/v1/incidents/{id}/evidence) — EvidenceService
+      # re-validates MIME/size server-side (TZ section 9), this is just the outer request cap.
+      # Kept just above EvidenceService.MAX_FILE_SIZE_BYTES (10MB) so a rejected-by-Spring
+      # oversized upload doesn't happen before EvidenceService gets a chance to return its own
+      # clear BAD_REQUEST message.
+      max-file-size: 11MB
+      max-request-size: 12MB
+
+server:
+  port: 8082
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# --- Application-specific settings (env-overridable) ---
+app:
+  security:
+    # When true, mustChangePassword=true accounts get 403'd on every endpoint
+    # except /auth/** until they call POST /auth/change-password. Off by
+    # default (2026-08-12 product decision): the change is optional, not
+    # enforced. Flip to true if a compliance requirement brings enforcement
+    # back — no code change needed, just this flag.
+    enforce-password-change: ${ENFORCE_PASSWORD_CHANGE:false}
+    # `Secure` attribute on the refresh-token cookie (RefreshCookieFactory). MUST be true in
+    # prod (cookie only sent over HTTPS) — false here only because local dev runs on plain
+    # http://localhost, where a Secure cookie would be silently rejected by the browser.
+    # application-prod.yml hardcodes this to `true` (no env dependency) and
+    # ProductionCookieSecurityGuard fails app startup under the prod/production profile if it
+    # ever resolves to false — see both for why this base default is allowed to stay `false`.
+    cookie-secure: ${COOKIE_SECURE:false}
+  cors:
+    # Comma-separated explicit origin list — SecurityConfig pairs this with allowCredentials(true)
+    # for the HttpOnly refresh-token cookie, so this can never be "*". Override via env in every
+    # non-dev environment to the real admin-panel origin(s).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:CHANGE_ME_dev_only_32_bytes_minimum_secret_key}
+    access-token-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900}       # 15 min
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:1209600} # 14 days
+  lockout:
+    max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
+    lock-duration-minutes: ${LOGIN_LOCK_DURATION_MINUTES:15}
+
+storage:
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:transport-observer}

@@ -1,0 +1,18 @@
+# Production profile. Activate with SPRING_PROFILES_ACTIVE=prod (or -Dspring.profiles.active=prod).
+#
+# This file intentionally does NOT mirror every section of application-dev.yml — datasource,
+# Redis and RabbitMQ credentials for a real deployment are expected to be supplied via env vars
+# on top of the defaults already declared in application.yml/application-dev.yml (or a future
+# dedicated section here once real infra values are known). What it DOES pin down is the one
+# setting that must never silently fall back to an insecure default in production: the refresh
+# cookie's `Secure` flag.
+app:
+  security:
+    # Deliberately hardcoded to `true` with NO ${COOKIE_SECURE:...} env override here. In
+    # application.yml the base value defaults to false (needed for local dev over plain HTTP),
+    # and an operator forgetting to set COOKIE_SECURE=true when deploying is a realistic mistake.
+    # Profile-specific values in application-prod.yml take precedence over application.yml, so as
+    # long as `prod` is the active profile this cannot silently regress to false — even if
+    # COOKIE_SECURE is left unset (or accidentally set to false) in the deployment environment.
+    # See RefreshCookieFactory and ProductionCookieSecurityGuard for the runtime enforcement.
+    cookie-secure: true

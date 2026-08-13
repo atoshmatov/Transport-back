@@ -1,0 +1,37 @@
+# Local development profile. Matches docker-compose.yml at the project root.
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:transport_observer}
+    username: ${DB_USER:transport_observer}
+    password: ${DB_PASS:transport_observer}
+    hikari:
+      maximum-pool-size: 10
+
+  jpa:
+    hibernate:
+      # TODO: switch to `validate` once Flyway/Liquibase migrations are introduced.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        # PostGIS support (hibernate-spatial on the classpath) is
+        # auto-detected by the standard PostgreSQL dialect in Hibernate 6.
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASS:guest}
+
+logging:
+  level:
+    uz.safecity.transportobserver: DEBUG
+    org.springframework.security: INFO
