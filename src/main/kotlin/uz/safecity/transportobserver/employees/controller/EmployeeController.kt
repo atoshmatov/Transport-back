@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.employees.controller
 
 import uz.safecity.transportobserver.auth.entity.RoleType
+import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.employees.dto.EmployeeDto
@@ -8,13 +9,17 @@ import uz.safecity.transportobserver.employees.entity.EmployeeStatus
 import uz.safecity.transportobserver.employees.service.EmployeeService
 import org.springframework.data.domain.Pageable
 import org.springframework.data.web.PageableDefault
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 
 /**
@@ -47,4 +52,12 @@ class EmployeeController(
 	@GetMapping("/{id}")
 	fun getById(@PathVariable id: UUID): ResponseEntity<ApiResponse<EmployeeDto>> =
 		ResponseEntity.ok(ApiResponse.ok(employeeService.getById(id)))
+
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
+	@PostMapping(value = ["/me/photo"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+	fun uploadMyPhoto(
+		@RequestParam("file") file: MultipartFile,
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<EmployeeDto>> =
+		ResponseEntity.ok(ApiResponse.ok(employeeService.uploadMyPhoto(principal.accountId, file)))
 }

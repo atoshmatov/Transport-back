@@ -31,10 +31,11 @@ data class EmployeeDto(
 	val username: String?,
 	val role: RoleType?,
 	val isActive: Boolean?,
-	val mustChangePassword: Boolean?
+	val mustChangePassword: Boolean?,
+	val photoUrl: String? = null
 ) {
 	companion object {
-		fun from(employee: Employee, account: Account?) = EmployeeDto(
+		fun from(employee: Employee, account: Account?, photoUrl: String? = null) = EmployeeDto(
 			id = requireNotNull(employee.id),
 			fullName = employee.fullName,
 			position = employee.position,
@@ -47,7 +48,8 @@ data class EmployeeDto(
 			username = account?.username,
 			role = account?.role,
 			isActive = account?.isActive,
-			mustChangePassword = account?.mustChangePassword
+			mustChangePassword = account?.mustChangePassword,
+			photoUrl = photoUrl
 		)
 	}
 }

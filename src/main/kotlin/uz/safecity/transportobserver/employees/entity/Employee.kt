@@ -43,6 +43,9 @@ class Employee(
 	var status: EmployeeStatus = EmployeeStatus.ACTIVE,
 
 	@Column(name = "hired_at")
-	var hiredAt: LocalDate? = null
+	var hiredAt: LocalDate? = null,
+
+	@Column(name = "photo_key")
+	var photoKey: String? = null
 
 ) : BaseEntity()

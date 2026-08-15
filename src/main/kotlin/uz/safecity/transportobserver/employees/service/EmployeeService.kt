@@ -11,6 +11,9 @@ import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.ConflictException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
+import uz.safecity.transportobserver.common.exception.BadRequestException
+import uz.safecity.transportobserver.common.storage.FileStorageService
+import org.springframework.web.multipart.MultipartFile
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeRequest
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeResponse
 import uz.safecity.transportobserver.employees.dto.EmployeeDto
@@ -33,7 +36,8 @@ class EmployeeService(
 	private val passwordEncoder: PasswordEncoder,
 	private val temporaryPasswordGenerator: TemporaryPasswordGenerator,
 	private val authService: AuthService,
-	private val auditService: AuditService
+	private val auditService: AuditService,
+	private val fileStorageService: FileStorageService
 ) {
 
 	fun list(
@@ -61,7 +65,7 @@ class EmployeeService(
 			.associateBy { it.employeeId }
 
 		return PageResponse(
-			content = page.content.map { EmployeeDto.from(it, accountsByEmployeeId[it.id]) },
+			content = page.content.map { EmployeeDto.from(it, accountsByEmployeeId[it.id], getPhotoUrl(it.photoKey)) },
 			page = page.number,
 			size = page.size,
 			totalElements = page.totalElements,
@@ -72,7 +76,7 @@ class EmployeeService(
 	fun getById(id: UUID): EmployeeDto {
 		val employee = findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id).orElse(null)
-		return EmployeeDto.from(employee, account)
+		return EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey))
 	}
 
 	/** Creates the [Employee] row and its linked [Account] together. See [CreateEmployeeResponse] kdoc re: the one-time password. */
@@ -118,7 +122,7 @@ class EmployeeService(
 		)
 
 		return CreateEmployeeResponse(
-			employee = EmployeeDto.from(employee, account),
+			employee = EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey)),
 			temporaryPassword = temporaryPassword
 		)
 	}
@@ -147,7 +151,7 @@ class EmployeeService(
 
 		auditService.record(actorAccountId, "EMPLOYEE_UPDATED", "Employee", id)
 
-		return EmployeeDto.from(saved, account)
+		return EmployeeDto.from(saved, account, getPhotoUrl(saved.photoKey))
 	}
 
 	/** Block/activate = flips Account.isActive. Blocking immediately revokes every live session (TASK-566 pattern). */
@@ -172,7 +176,7 @@ class EmployeeService(
 			entityId = id
 		)
 
-		return EmployeeDto.from(employee, account)
+		return EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey))
 	}
 
 	/** Delegates to [AuthService.resetPassword] so both admin-reset flows (here and /auth/reset-password) share one implementation. */
@@ -267,8 +271,70 @@ class EmployeeService(
 		return candidate
 	}
 
+	private fun getPhotoUrl(photoKey: String?): String? =
+		photoKey?.let { fileStorageService.presignedGetUrl(it) }
+
+	@Transactional
+	fun uploadPhoto(id: UUID, file: MultipartFile, actorAccountId: UUID?, actorRole: RoleType): EmployeeDto {
+		val account = accountRepository.findByEmployeeId(id).orElse(null)
+		account?.let { assertCanManageRole(actorRole, it.role) }
+		return uploadPhotoInternal(id, file, actorAccountId)
+	}
+
+	@Transactional
+	fun uploadMyPhoto(accountId: UUID, file: MultipartFile): EmployeeDto {
+		val account = accountRepository.findById(accountId)
+			.orElseThrow { ResourceNotFoundException("Hisob topilmadi") }
+		val employeeId = account.employeeId
+			?: throw BadRequestException("Hisobga bog'langan xodim topilmadi")
+		return uploadPhotoInternal(employeeId, file, accountId)
+	}
+
+	private fun uploadPhotoInternal(employeeId: UUID, file: MultipartFile, actorAccountId: UUID?): EmployeeDto {
+		val employee = findEmployeeOrThrow(employeeId)
+		val account = accountRepository.findByEmployeeId(employeeId).orElse(null)
+
+		if (file.isEmpty) throw BadRequestException("Fayl bo'sh")
+		if (file.size > MAX_PHOTO_SIZE_BYTES) {
+			throw BadRequestException("Rasm hajmi ${MAX_PHOTO_SIZE_BYTES / (1024 * 1024)}MB dan oshmasligi kerak")
+		}
+
+		val bytes = file.bytes
+		val sniffedType = sniffImageType(bytes)
+			?: throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+		if (file.contentType != null && file.contentType !in ALLOWED_MIME_TYPES) {
+			throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+		}
+
+		val extension = if (sniffedType == "image/png") "png" else "jpg"
+		val objectKey = "employees/$employeeId/photo.$extension"
+		fileStorageService.upload(objectKey, bytes, sniffedType)
+
+		employee.photoKey = objectKey
+		val saved = employeeRepository.save(employee)
+
+		auditService.record(
+			actorAccountId = actorAccountId,
+			action = "EMPLOYEE_PHOTO_UPLOADED",
+			entityType = "Employee",
+			entityId = employeeId,
+			metadata = "photoKey=$objectKey"
+		)
+
+		return EmployeeDto.from(saved, account, getPhotoUrl(saved.photoKey))
+	}
+
+	private fun sniffImageType(bytes: ByteArray): String? = when {
+		bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte() -> "image/jpeg"
+		bytes.size >= 4 && bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&
+			bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte() -> "image/png"
+		else -> null
+	}
+
 	companion object {
 		/** Leaves headroom under the 64-char `accounts.username` column for a numeric dedup suffix. */
 		private const val USERNAME_BASE_MAX_LENGTH = 55
+		private const val MAX_PHOTO_SIZE_BYTES = 5L * 1024 * 1024 // 5MB
+		private val ALLOWED_MIME_TYPES = setOf("image/jpeg", "image/png")
 	}
 }

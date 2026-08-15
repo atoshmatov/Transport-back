@@ -49,7 +49,7 @@ class SecurityConfig(
 	@Bean
 	fun corsConfigurationSource(): CorsConfigurationSource {
 		val config = CorsConfiguration().apply {
-			allowedOrigins = allowedOriginsConfig.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+			allowedOriginPatterns = listOf("*")
 			allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 			allowedHeaders = listOf("*")
 			// Required for the HttpOnly refresh-token cookie (RefreshCookieFactory) to be sent/accepted

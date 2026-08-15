@@ -11,6 +11,7 @@ import uz.safecity.transportobserver.employees.dto.UpdateEmployeeStatusRequest
 import uz.safecity.transportobserver.employees.service.EmployeeService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -20,7 +21,9 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 
 /**
@@ -78,4 +81,13 @@ class AdminEmployeeController(
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<ResetPasswordResponse>> =
 		ResponseEntity.ok(ApiResponse.ok(employeeService.resetPassword(id, principal.accountId, principal.role)))
+
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN')")
+	@PostMapping(value = ["/{id}/photo"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+	fun uploadPhoto(
+		@PathVariable id: UUID,
+		@RequestParam("file") file: MultipartFile,
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<EmployeeDto>> =
+		ResponseEntity.ok(ApiResponse.ok(employeeService.uploadPhoto(id, file, principal.accountId, principal.role)))
 }
