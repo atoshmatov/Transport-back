@@ -12,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.multipart.MaxUploadSizeExceededException
+import jakarta.servlet.http.HttpServletRequest
 
 /**
  * Central place that turns exceptions into the [ErrorResponse] envelope.
@@ -23,9 +24,21 @@ class GlobalExceptionHandler {
 
 	private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
+	/**
+	 * 4xx [ApiException]s (e.g. [ResourceNotFoundException] "... topilmadi") were previously
+	 * silent server-side — only [ex.status.is5xxServerError] was logged, so a client-visible
+	 * "ID topilmadi" error (wrong id sent by a caller, e.g. an account id used where an employee
+	 * id was expected on the photo-upload endpoint) left no trace in the backend log, making it
+	 * impossible to tell from the server side which id/endpoint actually 404'd after the fact.
+	 * Logging every 4xx at WARN with method+path closes that gap without changing the response.
+	 */
 	@ExceptionHandler(ApiException::class)
-	fun handleApiException(ex: ApiException): ResponseEntity<ErrorResponse> {
-		if (ex.status.is5xxServerError) log.error("API error: {}", ex.message, ex)
+	fun handleApiException(ex: ApiException, request: HttpServletRequest): ResponseEntity<ErrorResponse> {
+		if (ex.status.is5xxServerError) {
+			log.error("API error: {}", ex.message, ex)
+		} else {
+			log.warn("API error: {} {} -> {} {}", request.method, request.requestURI, ex.status.value(), ex.message)
+		}
 		return ResponseEntity.status(ex.status).body(
 			ErrorResponse(code = ex.code, message = ex.message)
 		)
