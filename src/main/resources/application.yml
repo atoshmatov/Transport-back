@@ -51,7 +51,7 @@ app:
     # Comma-separated explicit origin list — SecurityConfig pairs this with allowCredentials(true)
     # for the HttpOnly refresh-token cookie, so this can never be "*". Override via env in every
     # non-dev environment to the real admin-panel origin(s).
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,*}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
 security:
   jwt:

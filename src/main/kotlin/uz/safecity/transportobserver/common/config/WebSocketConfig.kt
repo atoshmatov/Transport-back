@@ -1,5 +1,6 @@
 package uz.safecity.transportobserver.common.config
 
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Configuration
 import org.springframework.messaging.simp.config.ChannelRegistration
 import org.springframework.messaging.simp.config.MessageBrokerRegistry
@@ -21,14 +22,16 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * CONNECT frame itself — see that class for why the check can't live in
  * SecurityConfig's HTTP filter chain.
  *
- * TODO(prod): `setAllowedOriginPatterns("*")` below is dev-only, same as
- * SecurityConfig.corsConfigurationSource — lock both down to the real
- * admin-panel/mobile origins before this goes near production.
+ * Allowed origins share the same env-based whitelist (app.cors.allowed-origins /
+ * CORS_ALLOWED_ORIGINS) as SecurityConfig.corsConfigurationSource, so the browser-facing
+ * admin-panel origin only has to be configured in one place.
  */
 @Configuration
 @EnableWebSocketMessageBroker
 class WebSocketConfig(
-	private val webSocketAuthChannelInterceptor: WebSocketAuthChannelInterceptor
+	private val webSocketAuthChannelInterceptor: WebSocketAuthChannelInterceptor,
+	@Value("\${app.cors.allowed-origins}")
+	private val allowedOriginsConfig: String
 ) : WebSocketMessageBrokerConfigurer {
 
 	override fun configureMessageBroker(registry: MessageBrokerRegistry) {
@@ -38,8 +41,9 @@ class WebSocketConfig(
 	}
 
 	override fun registerStompEndpoints(registry: StompEndpointRegistry) {
+		val allowedOrigins = allowedOriginsConfig.split(",").map { it.trim() }.filter { it.isNotEmpty() }
 		registry.addEndpoint("/ws")
-			.setAllowedOriginPatterns("*") // TODO(prod): restrict to real origins
+			.setAllowedOrigins(*allowedOrigins.toTypedArray())
 			.withSockJS()
 	}
 
