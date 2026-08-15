@@ -4,6 +4,7 @@ import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.ratings.dto.InspectorRatingDto
 import uz.safecity.transportobserver.ratings.dto.MyRatingDto
+import uz.safecity.transportobserver.ratings.dto.RatingSnapshotDto
 import uz.safecity.transportobserver.ratings.service.RatingService
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
@@ -37,5 +38,13 @@ class RatingController(
 	fun me(@AuthenticationPrincipal principal: CustomUserDetails): ResponseEntity<ApiResponse<MyRatingDto>> {
 		val rating = ratingService.getMyRating(principal) ?: return ResponseEntity.noContent().build()
 		return ResponseEntity.ok(ApiResponse.ok(rating))
+	}
+
+	// Same role set / 204-for-non-INSPECTOR contract as #me — see RatingService#getMyRatingHistory kdoc.
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
+	@GetMapping("/me/history")
+	fun myHistory(@AuthenticationPrincipal principal: CustomUserDetails): ResponseEntity<ApiResponse<List<RatingSnapshotDto>>> {
+		val history = ratingService.getMyRatingHistory(principal) ?: return ResponseEntity.noContent().build()
+		return ResponseEntity.ok(ApiResponse.ok(history))
 	}
 }

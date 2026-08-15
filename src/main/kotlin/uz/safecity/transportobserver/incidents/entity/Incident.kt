@@ -14,6 +14,24 @@ enum class IncidentStatus { NEW, IN_PROGRESS, RESOLVED, REJECTED }
 enum class IncidentType { ACCIDENT, VIOLATION, TECHNICAL_FAULT, SECURITY, OTHER }
 
 /**
+ * What the inspector actually DID when filing this [Incident] — orthogonal to [IncidentType]
+ * (which is WHAT happened / what kind of situation was observed). Added for the mobile Profile
+ * screen's "harakat turi bo'yicha" donut breakdown + the 5-metric `GET
+ * /api/v1/inspector/me/stats` (see [uz.safecity.transportobserver.inspector.service.InspectorPanelService]
+ * kdoc), which previously had no server-side data at all and was hardcoded on the client.
+ *
+ * Nullable on the entity ([Incident.actionType]) rather than a required column with a Flyway
+ * backfill: this app has no Flyway/Liquibase migrations yet (`ddl-auto: update`, see
+ * application-dev.yml TODO), and every [Incident] row created before this field existed has no
+ * sensible default action to backfill to (guessing one would fabricate data, not recover it).
+ * MVP tradeoff, not an oversight — see [uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest]
+ * kdoc for the client-facing side of this, and
+ * [uz.safecity.transportobserver.inspector.service.InspectorPanelService.getActionTypeBreakdown]
+ * for how legacy null rows are excluded from the breakdown rather than fabricated into a bucket.
+ */
+enum class ActionType { VIOLATION_RECORDED, WARNING_GIVEN, PHOTO_EVIDENCE_SUBMITTED, DANGER_REPORTED }
+
+/**
  * Placeholder — PostGIS-backed geolocation via Hibernate Spatial (`Point`,
  * SRID 4326 / WGS84). Full schema (attachments, assigned inspector, SLA
  * timestamps, etc.) comes from TZ section 6 in the next implementation pass.
@@ -35,6 +53,11 @@ class Incident(
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 32)
 	var status: IncidentStatus = IncidentStatus.NEW,
+
+	/** What the inspector did — see [ActionType] kdoc for why this is nullable. */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "action_type", length = 32)
+	var actionType: ActionType? = null,
 
 	@Column(columnDefinition = "geometry(Point,4326)")
 	var location: Point? = null,

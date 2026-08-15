@@ -1,5 +1,7 @@
 package uz.safecity.transportobserver.ratings.dto
 
+import uz.safecity.transportobserver.ratings.entity.RatingSnapshot
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -28,3 +30,23 @@ data class MyRatingDto(
 	/** Null when the caller doesn't rank inside [uz.safecity.transportobserver.ratings.service.RatingService]'s top list — still their own real stats, just no rank assigned. */
 	val rank: Int?
 )
+
+/**
+ * `GET /api/v1/ratings/me/history` row — mobile Profile screen "reyting dinamikasi" chart. See
+ * [RatingSnapshot] kdoc for why this carries [completedInspectionsCount] rather than an invented
+ * 0-5 score, and why the list is typically empty today (no scheduled job populates it yet — MVP
+ * table, not a bug).
+ */
+data class RatingSnapshotDto(
+	val snapshotDate: LocalDate,
+	val completedInspectionsCount: Int,
+	val rank: Int?
+) {
+	companion object {
+		fun from(snapshot: RatingSnapshot) = RatingSnapshotDto(
+			snapshotDate = snapshot.snapshotDate,
+			completedInspectionsCount = snapshot.completedInspectionsCount,
+			rank = snapshot.rank
+		)
+	}
+}

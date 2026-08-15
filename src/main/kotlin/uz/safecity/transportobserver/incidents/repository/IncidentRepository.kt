@@ -2,6 +2,7 @@ package uz.safecity.transportobserver.incidents.repository
 
 import uz.safecity.transportobserver.common.dto.DailyCountProjection
 import uz.safecity.transportobserver.common.dto.RegionCountProjection
+import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
 import uz.safecity.transportobserver.incidents.entity.IncidentType
@@ -74,4 +75,38 @@ interface IncidentRepository : JpaRepository<Incident, UUID>, JpaSpecificationEx
 		nativeQuery = true
 	)
 	fun countDailyCreatedBetween(@Param("start") start: Instant, @Param("end") end: Instant): List<DailyCountProjection>
+
+	/**
+	 * Mobile Profile screen "hodisa turi bo'yicha" donut (InspectorPanelService#getIncidentTypeBreakdown)
+	 * — [IncidentType] counts scoped to a single inspector's own assigned incidents (any [IncidentStatus]).
+	 * One `GROUP BY` query rather than one `COUNT` per [IncidentType] value.
+	 */
+	@Query("select i.type as type, count(i) as cnt from Incident i where i.assignedInspectorId = :inspectorId group by i.type")
+	fun countGroupByTypeForInspector(@Param("inspectorId") inspectorId: UUID): List<IncidentTypeCountProjection>
+
+	/**
+	 * Mobile Profile screen "harakat turi bo'yicha" donut + the `GET /api/v1/inspector/me/stats`
+	 * 4 action-count metrics (InspectorPanelService#getActionTypeBreakdown / #getMyStats) —
+	 * [ActionType] counts scoped to a single inspector's own assigned incidents. [ActionType]
+	 * itself is nullable on [Incident] (legacy rows predating the field — see that entity's
+	 * kdoc), so `actionType` can be null here too; callers filter/bucket that out rather than
+	 * fabricating a count for "unspecified".
+	 */
+	@Query("select i.actionType as actionType, count(i) as cnt from Incident i where i.assignedInspectorId = :inspectorId group by i.actionType")
+	fun countGroupByActionTypeForInspector(@Param("inspectorId") inspectorId: UUID): List<IncidentActionTypeCountProjection>
+
+	/** Mobile Profile screen "so'nggi ishlar" widget — the caller's most recently created incident reports. */
+	fun findTop10ByAssignedInspectorIdOrderByCreatedAtDesc(assignedInspectorId: UUID): List<Incident>
+}
+
+/** See [IncidentRepository.countGroupByTypeForInspector]. */
+interface IncidentTypeCountProjection {
+	val type: IncidentType
+	val cnt: Long
+}
+
+/** See [IncidentRepository.countGroupByActionTypeForInspector]. */
+interface IncidentActionTypeCountProjection {
+	val actionType: ActionType?
+	val cnt: Long
 }

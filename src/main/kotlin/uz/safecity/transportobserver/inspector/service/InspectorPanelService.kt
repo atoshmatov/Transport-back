@@ -4,13 +4,19 @@ import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository
 import uz.safecity.transportobserver.common.exception.ForbiddenException
+import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
+import uz.safecity.transportobserver.incidents.entity.IncidentType
 import uz.safecity.transportobserver.incidents.repository.IncidentRepository
 import uz.safecity.transportobserver.inspections.entity.Inspection
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
+import uz.safecity.transportobserver.inspector.dto.ActionTypeCountDto
 import uz.safecity.transportobserver.inspector.dto.DashboardSummaryDto
+import uz.safecity.transportobserver.inspector.dto.IncidentTypeCountDto
 import uz.safecity.transportobserver.inspector.dto.InspectorCurrentLocationDto
+import uz.safecity.transportobserver.inspector.dto.InspectorStatsDto
+import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
 import uz.safecity.transportobserver.inspector.dto.RecentInspectionDto
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -101,6 +107,70 @@ class InspectorPanelService(
 			lng = null,
 			lastUpdatedAt = latestUpdatedAt(assigned)
 		)
+	}
+
+	/**
+	 * `GET /api/v1/inspector/me/stats` — see [InspectorStatsDto] kdoc for why
+	 * [InspectorStatsDto.totalInspectionsCount] and the 4 action counts come from two different
+	 * repositories/modules. The action counts reuse [countGroupByActionTypeForInspector]'s single
+	 * grouped query (already computed for [getActionTypeBreakdown]) rather than 4 separate
+	 * `COUNT` calls.
+	 */
+	fun getMyStats(principal: CustomUserDetails): InspectorStatsDto {
+		assertInspector(principal.role)
+		val accountId = principal.accountId
+
+		val totalInspectionsCount = inspectionRepository.countByAssignedInspectorIdAndStatus(
+			accountId,
+			InspectionStatus.COMPLETED
+		)
+
+		val actionCounts = incidentRepository.countGroupByActionTypeForInspector(accountId)
+			.mapNotNull { row -> row.actionType?.let { it to row.cnt } }
+			.toMap()
+
+		return InspectorStatsDto(
+			totalInspectionsCount = totalInspectionsCount.toInt(),
+			violationsRecordedCount = (actionCounts[ActionType.VIOLATION_RECORDED] ?: 0L).toInt(),
+			warningsGivenCount = (actionCounts[ActionType.WARNING_GIVEN] ?: 0L).toInt(),
+			photoEvidenceSubmittedCount = (actionCounts[ActionType.PHOTO_EVIDENCE_SUBMITTED] ?: 0L).toInt(),
+			dangersReportedCount = (actionCounts[ActionType.DANGER_REPORTED] ?: 0L).toInt()
+		)
+	}
+
+	/**
+	 * `GET /api/v1/inspector/me/incident-type-breakdown` — see [IncidentTypeCountDto] kdoc for why
+	 * every [IncidentType] value is always represented (zero-filled), not just the ones with data.
+	 */
+	fun getIncidentTypeBreakdown(principal: CustomUserDetails): List<IncidentTypeCountDto> {
+		assertInspector(principal.role)
+
+		val countsByType = incidentRepository.countGroupByTypeForInspector(principal.accountId)
+			.associate { it.type to it.cnt }
+
+		return IncidentType.entries.map { type -> IncidentTypeCountDto(type, countsByType[type] ?: 0L) }
+	}
+
+	/**
+	 * `GET /api/v1/inspector/me/action-type-breakdown` — see [ActionTypeCountDto] kdoc for why
+	 * legacy null-`actionType` incidents are excluded rather than bucketed as "unspecified".
+	 */
+	fun getActionTypeBreakdown(principal: CustomUserDetails): List<ActionTypeCountDto> {
+		assertInspector(principal.role)
+
+		val countsByAction = incidentRepository.countGroupByActionTypeForInspector(principal.accountId)
+			.mapNotNull { row -> row.actionType?.let { it to row.cnt } }
+			.toMap()
+
+		return ActionType.entries.map { action -> ActionTypeCountDto(action, countsByAction[action] ?: 0L) }
+	}
+
+	/** `GET /api/v1/inspector/me/recent-activity` — see [RecentActivityDto] kdoc. */
+	fun getRecentActivity(principal: CustomUserDetails): List<RecentActivityDto> {
+		assertInspector(principal.role)
+
+		return incidentRepository.findTop10ByAssignedInspectorIdOrderByCreatedAtDesc(principal.accountId)
+			.map { RecentActivityDto.from(it) }
 	}
 
 	private fun assignedIncidents(principal: CustomUserDetails): List<Incident> {

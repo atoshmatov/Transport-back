@@ -141,6 +141,7 @@ class IncidentService(
 			title = request.title,
 			description = request.description,
 			type = requireNotNull(request.type),
+			actionType = request.actionType,
 			location = GeoUtils.toPointOrNull(request.latitude, request.longitude),
 			reportedBy = principal.accountId,
 			occurredAt = request.occurredAt ?: Instant.now(),

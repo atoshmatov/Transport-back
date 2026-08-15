@@ -8,6 +8,8 @@ import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
 import uz.safecity.transportobserver.ratings.dto.InspectorRatingDto
 import uz.safecity.transportobserver.ratings.dto.MyRatingDto
+import uz.safecity.transportobserver.ratings.dto.RatingSnapshotDto
+import uz.safecity.transportobserver.ratings.repository.RatingSnapshotRepository
 import org.springframework.stereotype.Service
 import java.util.UUID
 
@@ -32,7 +34,8 @@ import java.util.UUID
 class RatingService(
 	private val accountRepository: AccountRepository,
 	private val employeeRepository: EmployeeRepository,
-	private val inspectionRepository: InspectionRepository
+	private val inspectionRepository: InspectionRepository,
+	private val ratingSnapshotRepository: RatingSnapshotRepository
 ) {
 
 	fun getTop(): List<InspectorRatingDto> = fullRanking().take(TOP_LIMIT)
@@ -68,6 +71,25 @@ class RatingService(
 			completedInspectionsCount = completedCount.toInt(),
 			rank = rank
 		)
+	}
+
+	/**
+	 * `GET /api/v1/ratings/me/history` — mobile Profile screen "reyting dinamikasi" chart.
+	 * Same null-for-non-INSPECTOR / 204-at-the-controller contract as [getMyRating] (an
+	 * ADMIN/OPERATOR/SUPER_ADMIN has no personal rating history either). Ordered oldest-first
+	 * (see [RatingSnapshotRepository.findByAccountIdOrderBySnapshotDateAsc]) so the client can
+	 * plot it left-to-right without re-sorting.
+	 *
+	 * Returns whatever [RatingSnapshot] rows already exist for this account — see that entity's
+	 * kdoc for why this is typically empty today (no scheduled snapshot job yet). An empty list
+	 * is a valid, honest answer here (still `200 OK`, not `204`) — it's "no history yet", not
+	 * "you have no rating at all" like [getMyRating]'s null case.
+	 */
+	fun getMyRatingHistory(principal: CustomUserDetails): List<RatingSnapshotDto>? {
+		if (principal.role != RoleType.INSPECTOR) return null
+
+		return ratingSnapshotRepository.findByAccountIdOrderBySnapshotDateAsc(principal.accountId)
+			.map { RatingSnapshotDto.from(it) }
 	}
 
 	/**

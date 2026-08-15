@@ -1,5 +1,6 @@
 package uz.safecity.transportobserver.incidents.dto
 
+import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
 import uz.safecity.transportobserver.incidents.entity.IncidentType
@@ -15,6 +16,8 @@ data class IncidentDto(
 	val description: String?,
 	val type: IncidentType,
 	val status: IncidentStatus,
+	/** What the inspector did — see [ActionType] kdoc; null on incidents created before this field existed. */
+	val actionType: ActionType?,
 	val latitude: Double?,
 	val longitude: Double?,
 	val occurredAt: Instant?,
@@ -40,6 +43,7 @@ data class IncidentDto(
 			description = incident.description,
 			type = incident.type,
 			status = incident.status,
+			actionType = incident.actionType,
 			latitude = incident.location?.y,
 			longitude = incident.location?.x,
 			occurredAt = incident.occurredAt,
@@ -58,6 +62,12 @@ data class IncidentDto(
  * "GPS o'chirilgan holat" — a report must still go through with no GPS) but a half-supplied
  * pair (only one of the two) is rejected by IncidentService/GeoUtils as a client bug, not
  * silently dropped.
+ *
+ * [actionType] is optional, not `@NotNull`: older/not-yet-updated mobile app builds don't send
+ * it at all, and a report must still go through without it (same "must not block on a field the
+ * client doesn't have yet" reasoning as [latitude]/[longitude] being independently optional).
+ * Once the mobile client is fully migrated to send it on every report, product may decide to
+ * tighten this to required — that is a client-rollout decision, not a backend one.
  */
 data class CreateIncidentRequest(
 	@field:NotBlank(message = "title majburiy")
@@ -68,6 +78,9 @@ data class CreateIncidentRequest(
 
 	@field:NotNull(message = "type majburiy")
 	val type: IncidentType?,
+
+	/** What the inspector did while filing this report — see [ActionType] kdoc. */
+	val actionType: ActionType? = null,
 
 	val latitude: Double? = null,
 	val longitude: Double? = null,
