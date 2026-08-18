@@ -99,6 +99,29 @@ entity shouldn't be serialized directly).
    `transport-observer-postgres` should show `(healthy)`; the others just
    need to show `Up`.
 
+   > **Avoid the startup race condition**: `docker compose up -d` returns
+   > immediately, but Postgres takes a few seconds to actually become ready
+   > — starting the app (via IDE Run or `./gradlew bootRun`) too early fails
+   > with `PSQLException: Connection refused (localhost:5433)`. Use the
+   > helper script instead of `docker compose up -d` to block until Postgres
+   > is actually healthy:
+   >
+   > ```powershell
+   > # PowerShell
+   > .\scripts\wait-for-postgres.ps1          # wait, then Run from the IDE yourself
+   > .\scripts\wait-for-postgres.ps1 -Run     # wait, then also run ./gradlew bootRun
+   > ```
+   >
+   > ```bash
+   > # Git Bash
+   > ./scripts/wait-for-postgres.sh           # wait, then Run from the IDE yourself
+   > ./scripts/wait-for-postgres.sh --run     # wait, then also run ./gradlew bootRun
+   > ```
+   >
+   > Details on why this race condition happens (and the separate "port 8082
+   > already in use" issue from a leftover process): see
+   > [scripts/README.md](scripts/README.md).
+
 2. Run the app from IntelliJ IDEA — open `TransportObserverApplication.kt`,
    set the run configuration's active profile to `dev` (or pass
    `-Dspring.profiles.active=dev`), and press Run. As long as step 1's
