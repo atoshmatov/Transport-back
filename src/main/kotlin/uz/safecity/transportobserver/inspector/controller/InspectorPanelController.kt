@@ -9,22 +9,30 @@ import uz.safecity.transportobserver.inspector.dto.InspectorCurrentLocationDto
 import uz.safecity.transportobserver.inspector.dto.InspectorStatsDto
 import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
 import uz.safecity.transportobserver.inspector.service.InspectorPanelService
+import uz.safecity.transportobserver.map.dto.UpdateInspectorLocationRequest
+import uz.safecity.transportobserver.map.service.InspectorLocationService
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
  * Inspector web-panel dashboard + map screens. Every endpoint here is
  * INSPECTOR-only and scoped to the caller's own assigned incidents — see
- * [InspectorPanelService] kdoc for the scoping pattern.
+ * [InspectorPanelService] kdoc for the scoping pattern. `/me/location` is
+ * scoped the same way but backed by [InspectorLocationService] (`map` module)
+ * instead — see that service's kdoc.
  */
 @RestController
 @RequestMapping("/api/v1/inspector")
 class InspectorPanelController(
-	private val inspectorPanelService: InspectorPanelService
+	private val inspectorPanelService: InspectorPanelService,
+	private val inspectorLocationService: InspectorLocationService
 ) {
 
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
@@ -72,4 +80,20 @@ class InspectorPanelController(
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<List<RecentActivityDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(inspectorPanelService.getRecentActivity(principal)))
+
+	/**
+	 * Periodic foreground-location heartbeat from the mobile app (per task scope: every 1-2 min).
+	 * Upserts the caller's own single latest-position row — see [InspectorLocationService] kdoc.
+	 * `204 No Content` on success, same "no meaningful body" convention as
+	 * [uz.safecity.transportobserver.auth.controller.AuthController]'s ack endpoints.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@PostMapping("/me/location")
+	fun updateMyLocation(
+		@AuthenticationPrincipal principal: CustomUserDetails,
+		@Valid @RequestBody request: UpdateInspectorLocationRequest
+	): ResponseEntity<Void> {
+		inspectorLocationService.upsertMyLocation(principal, request)
+		return ResponseEntity.noContent().build()
+	}
 }
