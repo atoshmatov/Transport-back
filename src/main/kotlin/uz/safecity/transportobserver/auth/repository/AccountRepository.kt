@@ -24,6 +24,15 @@ interface AccountRepository : JpaRepository<Account, UUID> {
 	fun findByRoleAndIsActive(role: RoleType, isActive: Boolean): List<Account>
 
 	/**
+	 * Used by [uz.safecity.transportobserver.map.service.InspectorLocationService.listEmployeeLocations]
+	 * to find session-active inspectors without a DB round-trip that loads every INSPECTOR row —
+	 * the "since" cutoff (now - online window) is filtered at the DB level rather than fetching
+	 * [findByRole] wholesale and filtering in Kotlin, so this scales with active-session count,
+	 * not total inspector headcount.
+	 */
+	fun findByRoleAndLastActiveAtGreaterThanEqual(role: RoleType, lastActiveAt: Instant): List<Account>
+
+	/**
 	 * Reports dashboard `activeEmployeesCount` (ReportService). Counts *accounts*, not Employee
 	 * rows directly — equivalent in practice because every Employee-provisioned Account is 1:1
 	 * with its Employee (see EmployeeService#create, which always sets `employeeId` on creation),
@@ -62,4 +71,14 @@ interface AccountRepository : JpaRepository<Account, UUID> {
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("update Account a set a.failedAttempts = 0, a.lockedUntil = null where a.id = :id")
 	fun resetFailedAttempts(@Param("id") id: UUID): Int
+
+	/**
+	 * Called by [uz.safecity.transportobserver.auth.security.PresenceTracker] (throttled to
+	 * ~once/minute per account) instead of a find-then-save, same rationale as the
+	 * failed-attempts methods above: a plain UPDATE avoids loading/dirty-checking the whole
+	 * entity for a single-column timestamp bump that happens on the hot request path.
+	 */
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("update Account a set a.lastActiveAt = :now where a.id = :id")
+	fun updateLastActiveAt(@Param("id") id: UUID, @Param("now") now: Instant): Int
 }

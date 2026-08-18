@@ -2,11 +2,13 @@ package uz.safecity.transportobserver.employees.dto
 
 import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
+import uz.safecity.transportobserver.common.util.PresenceUtils
 import uz.safecity.transportobserver.employees.entity.Employee
 import uz.safecity.transportobserver.employees.entity.EmployeeStatus
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -32,7 +34,19 @@ data class EmployeeDto(
 	val role: RoleType?,
 	val isActive: Boolean?,
 	val mustChangePassword: Boolean?,
-	val photoUrl: String? = null
+	val photoUrl: String? = null,
+	/**
+	 * Session-activity presence — true iff [Account.lastActiveAt] (stamped by
+	 * [uz.safecity.transportobserver.auth.security.PresenceTracker] on every authenticated
+	 * request, any role, web or mobile) is within [PresenceUtils.ONLINE_WINDOW]. Unlike the
+	 * map's `GET /api/v1/map/employees` (which additionally factors in the INSPECTOR-only GPS
+	 * heartbeat, see [uz.safecity.transportobserver.map.service.InspectorLocationService]
+	 * kdoc), this roster endpoint covers every role, so it deliberately only uses the
+	 * session-activity signal — there is no location to speak of for an ADMIN/OPERATOR account.
+	 * `null` when there's no linked account at all (legacy row, see class kdoc above).
+	 */
+	val online: Boolean?,
+	val lastActiveAt: Instant?
 ) {
 	companion object {
 		fun from(employee: Employee, account: Account?, photoUrl: String? = null) = EmployeeDto(
@@ -49,7 +63,9 @@ data class EmployeeDto(
 			role = account?.role,
 			isActive = account?.isActive,
 			mustChangePassword = account?.mustChangePassword,
-			photoUrl = photoUrl
+			photoUrl = photoUrl,
+			online = account?.let { PresenceUtils.isRecent(it.lastActiveAt) },
+			lastActiveAt = account?.lastActiveAt
 		)
 	}
 }

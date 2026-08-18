@@ -46,7 +46,19 @@ class Account(
 	var lockedUntil: Instant? = null,
 
 	@Column(name = "created_by")
-	var createdBy: UUID? = null
+	var createdBy: UUID? = null,
+
+	/**
+	 * Last time this account made a successfully-authenticated request, from ANY platform
+	 * (web panel or mobile app) — stamped by [uz.safecity.transportobserver.auth.security.PresenceTracker]
+	 * from [uz.safecity.transportobserver.auth.security.JwtAuthenticationFilter] on every
+	 * request, throttled to at most once/minute per account (see that class's kdoc). This is
+	 * the "session activity" online signal, distinct from (and combined with, for INSPECTOR)
+	 * the GPS-heartbeat-based [uz.safecity.transportobserver.map.entity.InspectorLocation.updatedAt]
+	 * signal — see [uz.safecity.transportobserver.map.service.InspectorLocationService] kdoc.
+	 */
+	@Column(name = "last_active_at")
+	var lastActiveAt: Instant? = null
 
 ) : BaseEntity() {
 

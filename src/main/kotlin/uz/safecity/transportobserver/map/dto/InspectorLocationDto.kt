@@ -26,8 +26,17 @@ data class UpdateInspectorLocationRequest(
  * "Temiryo'l vokzallaridagi xodimlar" / "Magistral yo'llardagi xodimlar" / "Aeroportlardagi
  * xodimlar"). ADMIN/OPERATOR/SUPER_ADMIN only — see [uz.safecity.transportobserver.map.controller.MapController].
  *
- * [online] is computed at read time (not persisted) — true iff [lastSeenAt] is within
- * [uz.safecity.transportobserver.map.service.InspectorLocationService]'s online window.
+ * [online] is computed at read time (not persisted) from TWO signals — see
+ * [uz.safecity.transportobserver.map.service.InspectorLocationService.listEmployeeLocations]
+ * kdoc: the GPS heartbeat ([InspectorLocation.updatedAt]) OR any-platform session activity
+ * ([uz.safecity.transportobserver.auth.entity.Account.lastActiveAt]). Because of the latter, an
+ * inspector can be `online = true` having only ever logged into the web panel and never sent a
+ * GPS heartbeat — in that case [latitude]/[longitude] are `null` ("online, position unknown").
+ * Frontend must treat a `null` lat/lng as "show as online in a list/badge, but don't attempt to
+ * place a pin" rather than defaulting to (0,0) or omitting the row.
+ *
+ * [lastSeenAt] is the more recent of the two signals (`null` only in the never-should-happen case
+ * where neither is present).
  *
  * [category]: the mockup's 4 buckets are exactly
  * [uz.safecity.transportobserver.checkpoints.entity.Checkpoint.type] values, per the existing
@@ -44,20 +53,26 @@ data class UpdateInspectorLocationRequest(
 data class EmployeeLocationDto(
 	val inspectorId: UUID,
 	val name: String,
-	val latitude: Double,
-	val longitude: Double,
+	val latitude: Double?,
+	val longitude: Double?,
 	val online: Boolean,
-	val lastSeenAt: Instant,
+	val lastSeenAt: Instant?,
 	val category: String?
 ) {
 	companion object {
-		fun from(location: InspectorLocation, employee: Employee?, online: Boolean) = EmployeeLocationDto(
-			inspectorId = location.inspectorId,
+		fun from(
+			inspectorId: UUID,
+			location: InspectorLocation?,
+			employee: Employee?,
+			online: Boolean,
+			lastSeenAt: Instant?
+		) = EmployeeLocationDto(
+			inspectorId = inspectorId,
 			name = employee?.fullName ?: "Noma'lum inspektor",
-			latitude = location.location.y,
-			longitude = location.location.x,
+			latitude = location?.location?.y,
+			longitude = location?.location?.x,
 			online = online,
-			lastSeenAt = requireNotNull(location.updatedAt),
+			lastSeenAt = lastSeenAt,
 			// TODO (next task): no Inspector-Checkpoint assignment mechanism yet — see kdoc above.
 			category = null
 		)
