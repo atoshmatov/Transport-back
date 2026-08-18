@@ -80,7 +80,7 @@ class CheckpointService(
 	}
 
 	private fun findOrThrow(id: UUID): Checkpoint =
-		checkpointRepository.findById(id).orElseThrow { ResourceNotFoundException("Nazorat punkti topilmadi: $id") }
+		checkpointRepository.findById(id).orElseThrow { ResourceNotFoundException("error.checkpoint.not-found", id) }
 
 	private fun buildSpecification(regionName: String?, type: String?, isActive: Boolean?): Specification<Checkpoint> =
 		Specification { root, _, cb ->
@@ -95,8 +95,8 @@ class CheckpointService(
 	private fun toPoint(latitude: Double?, longitude: Double?): Point {
 		val lat = requireNotNull(latitude) { "latitude majburiy" }
 		val lng = requireNotNull(longitude) { "longitude majburiy" }
-		if (lat < -90.0 || lat > 90.0) throw BadRequestException("latitude -90..90 oralig'ida bo'lishi kerak")
-		if (lng < -180.0 || lng > 180.0) throw BadRequestException("longitude -180..180 oralig'ida bo'lishi kerak")
+		if (lat < -90.0 || lat > 90.0) throw BadRequestException("error.geo.invalid-latitude")
+		if (lng < -180.0 || lng > 180.0) throw BadRequestException("error.geo.invalid-longitude")
 		return GEOMETRY_FACTORY.createPoint(Coordinate(lng, lat))
 	}
 

@@ -107,10 +107,10 @@ class AuthService(
 	@Transactional
 	fun changePassword(accountId: UUID, request: ChangePasswordRequest) {
 		val account = accountRepository.findById(accountId)
-			.orElseThrow { ResourceNotFoundException("Account topilmadi") }
+			.orElseThrow { ResourceNotFoundException("error.auth.account-not-found") }
 
 		if (!passwordEncoder.matches(request.currentPassword, account.passwordHash)) {
-			throw InvalidCredentialsException("Eski parol noto'g'ri")
+			throw InvalidCredentialsException("error.auth.old-password-invalid")
 		}
 
 		account.passwordHash = passwordEncoder.encode(request.newPassword)
@@ -125,7 +125,7 @@ class AuthService(
 	@Transactional
 	fun resetPassword(accountId: UUID): ResetPasswordResponse {
 		val account = accountRepository.findById(accountId)
-			.orElseThrow { ResourceNotFoundException("Account topilmadi") }
+			.orElseThrow { ResourceNotFoundException("error.auth.account-not-found") }
 
 		val temporaryPassword = temporaryPasswordGenerator.generate()
 		account.passwordHash = passwordEncoder.encode(temporaryPassword)

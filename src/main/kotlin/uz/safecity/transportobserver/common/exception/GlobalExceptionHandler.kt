@@ -51,14 +51,14 @@ class GlobalExceptionHandler {
 			field to it.defaultMessage
 		}
 		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-			ErrorResponse(code = "VALIDATION_ERROR", message = "Kiritilgan ma'lumotlar noto'g'ri", details = details)
+			ErrorResponse(code = "VALIDATION_ERROR", message = Messages.resolve("error.common.validation-failed"), details = details)
 		)
 	}
 
 	@ExceptionHandler(BadCredentialsException::class)
 	fun handleBadCredentials(ex: BadCredentialsException): ResponseEntity<ErrorResponse> =
 		ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
-			ErrorResponse(code = "INVALID_CREDENTIALS", message = "Login yoki parol noto'g'ri")
+			ErrorResponse(code = "INVALID_CREDENTIALS", message = Messages.resolve("error.auth.invalid-credentials"))
 		)
 
 	/**
@@ -72,7 +72,7 @@ class GlobalExceptionHandler {
 	fun handleDataIntegrityViolation(ex: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
 		log.warn("Data integrity violation: {}", ex.message)
 		return ResponseEntity.status(HttpStatus.CONFLICT).body(
-			ErrorResponse(code = "CONFLICT", message = "Ma'lumot allaqachon mavjud yoki bog'liqlik cheklovi buzilgan")
+			ErrorResponse(code = "CONFLICT", message = Messages.resolve("error.common.data-integrity-conflict"))
 		)
 	}
 
@@ -86,20 +86,20 @@ class GlobalExceptionHandler {
 	@ExceptionHandler(MaxUploadSizeExceededException::class)
 	fun handleMaxUploadSize(ex: MaxUploadSizeExceededException): ResponseEntity<ErrorResponse> =
 		ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-			ErrorResponse(code = "BAD_REQUEST", message = "Fayl hajmi ruxsat etilgan chegaradan katta")
+			ErrorResponse(code = "BAD_REQUEST", message = Messages.resolve("error.common.upload-too-large"))
 		)
 
 	@ExceptionHandler(AccessDeniedException::class)
 	fun handleAccessDenied(ex: AccessDeniedException): ResponseEntity<ErrorResponse> =
 		ResponseEntity.status(HttpStatus.FORBIDDEN).body(
-			ErrorResponse(code = "FORBIDDEN", message = "Bu amalni bajarishga ruxsatingiz yo'q")
+			ErrorResponse(code = "FORBIDDEN", message = Messages.resolve("error.common.forbidden"))
 		)
 
 	@ExceptionHandler(Exception::class)
 	fun handleUnexpected(ex: Exception): ResponseEntity<ErrorResponse> {
 		log.error("Unhandled exception", ex)
 		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
-			ErrorResponse(code = "INTERNAL_ERROR", message = "Kutilmagan xatolik yuz berdi")
+			ErrorResponse(code = "INTERNAL_ERROR", message = Messages.resolve("error.common.internal"))
 		)
 	}
 }

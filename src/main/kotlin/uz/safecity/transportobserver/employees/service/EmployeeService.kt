@@ -87,7 +87,7 @@ class EmployeeService(
 
 		val username = request.username?.trim()?.takeIf { it.isNotBlank() } ?: generateUsername(request.fullName)
 		if (accountRepository.existsByUsername(username)) {
-			throw ConflictException("Username allaqachon band: $username")
+			throw ConflictException("error.employee.username-taken", username)
 		}
 
 		val employee = employeeRepository.save(
@@ -159,7 +159,7 @@ class EmployeeService(
 	fun updateStatus(id: UUID, isActive: Boolean, actorAccountId: UUID?, actorRole: RoleType): EmployeeDto {
 		val employee = findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id)
-			.orElseThrow { ResourceNotFoundException("Xodimga bog'langan hisob topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.employee.account-not-found", id) }
 		assertCanManageRole(actorRole, account.role)
 
 		account.isActive = isActive
@@ -184,7 +184,7 @@ class EmployeeService(
 	fun resetPassword(id: UUID, actorAccountId: UUID?, actorRole: RoleType): ResetPasswordResponse {
 		findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id)
-			.orElseThrow { ResourceNotFoundException("Xodimga bog'langan hisob topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.employee.account-not-found", id) }
 		assertCanManageRole(actorRole, account.role)
 
 		val response = authService.resetPassword(requireNotNull(account.id))
@@ -195,7 +195,7 @@ class EmployeeService(
 	}
 
 	private fun findEmployeeOrThrow(id: UUID): Employee =
-		employeeRepository.findById(id).orElseThrow { ResourceNotFoundException("Xodim topilmadi: $id") }
+		employeeRepository.findById(id).orElseThrow { ResourceNotFoundException("error.employee.not-found", id) }
 
 	/**
 	 * Role-hierarchy gate for account provisioning/management (create, block/activate,
@@ -215,7 +215,7 @@ class EmployeeService(
 		if (actorRole == RoleType.ADMIN &&
 			(targetOrRequestedRole == RoleType.SUPER_ADMIN || targetOrRequestedRole == RoleType.ADMIN)
 		) {
-			throw ForbiddenException("Sizda bu rolda hisob yaratish huquqi yo'q")
+			throw ForbiddenException("error.employee.role-create-forbidden")
 		}
 	}
 
@@ -284,9 +284,9 @@ class EmployeeService(
 	@Transactional
 	fun uploadMyPhoto(accountId: UUID, file: MultipartFile): EmployeeDto {
 		val account = accountRepository.findById(accountId)
-			.orElseThrow { ResourceNotFoundException("Hisob topilmadi") }
+			.orElseThrow { ResourceNotFoundException("error.employee.own-account-not-found") }
 		val employeeId = account.employeeId
-			?: throw BadRequestException("Hisobga bog'langan xodim topilmadi")
+			?: throw BadRequestException("error.employee.own-employee-not-linked")
 		return uploadPhotoInternal(employeeId, file, accountId)
 	}
 
@@ -294,16 +294,16 @@ class EmployeeService(
 		val employee = findEmployeeOrThrow(employeeId)
 		val account = accountRepository.findByEmployeeId(employeeId).orElse(null)
 
-		if (file.isEmpty) throw BadRequestException("Fayl bo'sh")
+		if (file.isEmpty) throw BadRequestException("error.employee.photo-empty")
 		if (file.size > MAX_PHOTO_SIZE_BYTES) {
-			throw BadRequestException("Rasm hajmi ${MAX_PHOTO_SIZE_BYTES / (1024 * 1024)}MB dan oshmasligi kerak")
+			throw BadRequestException("error.employee.photo-too-large", MAX_PHOTO_SIZE_BYTES / (1024 * 1024))
 		}
 
 		val bytes = file.bytes
 		val sniffedType = sniffImageType(bytes)
-			?: throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+			?: throw BadRequestException("error.employee.photo-invalid-type")
 		if (file.contentType != null && file.contentType !in ALLOWED_MIME_TYPES) {
-			throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+			throw BadRequestException("error.employee.photo-invalid-type")
 		}
 
 		val extension = if (sniffedType == "image/png") "png" else "jpg"

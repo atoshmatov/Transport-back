@@ -200,7 +200,7 @@ class InspectorPanelService(
 	 */
 	private fun assertInspector(role: RoleType) {
 		if (role != RoleType.INSPECTOR) {
-			throw ForbiddenException("Bu panel faqat inspektorlar uchun")
+			throw ForbiddenException("error.inspector.panel-forbidden")
 		}
 	}
 

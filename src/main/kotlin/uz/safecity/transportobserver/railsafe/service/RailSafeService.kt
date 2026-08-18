@@ -18,5 +18,5 @@ class RailSafeService(
 	fun list(): List<RailCrossingEvent> = railCrossingEventRepository.findAll()
 
 	fun getById(id: UUID): RailCrossingEvent =
-		railCrossingEventRepository.findById(id).orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $id") }
+		railCrossingEventRepository.findById(id).orElseThrow { ResourceNotFoundException("error.railsafe.event-not-found", id) }
 }

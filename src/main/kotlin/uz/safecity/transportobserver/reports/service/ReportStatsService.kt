@@ -120,7 +120,7 @@ class ReportStatsService(
 	 */
 	fun getActivity(range: String): List<ActivityReportItemDto> {
 		if (range != "7d") {
-			throw BadRequestException("Faqat range=7d qo'llab-quvvatlanadi hozircha")
+			throw BadRequestException("error.report.range-unsupported")
 		}
 
 		val today = LocalDate.now(APP_ZONE)

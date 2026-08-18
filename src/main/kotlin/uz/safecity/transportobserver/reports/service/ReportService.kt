@@ -18,5 +18,5 @@ class ReportService(
 	fun list(): List<Report> = reportRepository.findAll()
 
 	fun getById(id: UUID): Report =
-		reportRepository.findById(id).orElseThrow { ResourceNotFoundException("Hisobot topilmadi: $id") }
+		reportRepository.findById(id).orElseThrow { ResourceNotFoundException("error.report.not-found", id) }
 }

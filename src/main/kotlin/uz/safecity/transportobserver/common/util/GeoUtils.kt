@@ -28,13 +28,13 @@ object GeoUtils {
 	/** Null only when BOTH are null; a half-supplied pair is a [BadRequestException]. */
 	fun toPointOrNull(latitude: Double?, longitude: Double?): Point? {
 		if (latitude == null && longitude == null) return null
-		val lat = latitude ?: throw BadRequestException("longitude berilgan bo'lsa latitude ham majburiy")
-		val lng = longitude ?: throw BadRequestException("latitude berilgan bo'lsa longitude ham majburiy")
+		val lat = latitude ?: throw BadRequestException("error.geo.latitude-required")
+		val lng = longitude ?: throw BadRequestException("error.geo.longitude-required")
 		return toPoint(lat, lng)
 	}
 
 	private fun validateRange(latitude: Double, longitude: Double) {
-		if (latitude < -90.0 || latitude > 90.0) throw BadRequestException("latitude -90..90 oralig'ida bo'lishi kerak")
-		if (longitude < -180.0 || longitude > 180.0) throw BadRequestException("longitude -180..180 oralig'ida bo'lishi kerak")
+		if (latitude < -90.0 || latitude > 90.0) throw BadRequestException("error.geo.invalid-latitude")
+		if (longitude < -180.0 || longitude > 180.0) throw BadRequestException("error.geo.invalid-longitude")
 	}
 }

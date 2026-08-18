@@ -81,7 +81,7 @@ class InspectionService(
 			inspectionRepository.findByIdAndAssignedInspectorId(id, principal.accountId)
 		} else {
 			inspectionRepository.findById(id)
-		}.orElseThrow { ResourceNotFoundException("Tekshiruv topilmadi: $id") }
+		}.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 
 		val checkpoint = checkpointRepository.findById(inspection.checkpointId).orElse(null)
 		return InspectionDto.from(inspection, checkpoint)
@@ -102,7 +102,7 @@ class InspectionService(
 
 		val checkpointId = requireNotNull(request.checkpointId)
 		val checkpoint = checkpointRepository.findById(checkpointId)
-			.orElseThrow { BadRequestException("Nazorat punkti topilmadi: $checkpointId") }
+			.orElseThrow { BadRequestException("error.inspection.checkpoint-not-found", checkpointId) }
 
 		request.assignedInspectorId?.let { assertActiveInspector(it) }
 
@@ -143,12 +143,12 @@ class InspectionService(
 
 		val inspection = if (actorRole == RoleType.INSPECTOR) {
 			val inspectorAccountId = actorAccountId
-				?: throw ForbiddenException("Tekshiruv statusini o'zgartirishga ruxsatingiz yo'q")
+				?: throw ForbiddenException("error.inspection.status-change-forbidden")
 			inspectionRepository.findByIdAndAssignedInspectorId(id, inspectorAccountId)
-				.orElseThrow { ResourceNotFoundException("Tekshiruv topilmadi: $id") }
+				.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 		} else {
 			inspectionRepository.findById(id)
-				.orElseThrow { ResourceNotFoundException("Tekshiruv topilmadi: $id") }
+				.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 		}
 
 		inspection.status = status
@@ -174,7 +174,7 @@ class InspectionService(
 	private fun assertCanManage(actorRole: RoleType) {
 		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR)
 		if (actorRole !in allowed) {
-			throw ForbiddenException("Tekshiruv yaratishga ruxsatingiz yo'q")
+			throw ForbiddenException("error.inspection.create-forbidden")
 		}
 	}
 
@@ -187,18 +187,18 @@ class InspectionService(
 	private fun assertCanUpdateStatus(actorRole: RoleType) {
 		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR, RoleType.INSPECTOR)
 		if (actorRole !in allowed) {
-			throw ForbiddenException("Tekshiruv statusini o'zgartirishga ruxsatingiz yo'q")
+			throw ForbiddenException("error.inspection.status-change-forbidden")
 		}
 	}
 
 	private fun assertActiveInspector(inspectorAccountId: UUID) {
 		val account = accountRepository.findById(inspectorAccountId)
-			.orElseThrow { BadRequestException("Inspektor hisobi topilmadi: $inspectorAccountId") }
+			.orElseThrow { BadRequestException("error.inspection.assign-inspector-account-not-found", inspectorAccountId) }
 		if (account.role != RoleType.INSPECTOR) {
-			throw BadRequestException("Faqat INSPECTOR rolidagi hisobga tayinlash mumkin")
+			throw BadRequestException("error.inspection.assign-role-invalid")
 		}
 		if (!account.isActive) {
-			throw BadRequestException("Nofaol inspektor hisobiga tayinlab bo'lmaydi")
+			throw BadRequestException("error.inspection.assign-inspector-inactive")
 		}
 	}
 

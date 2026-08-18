@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.common.config
 
 import uz.safecity.transportobserver.auth.security.JwtService
+import uz.safecity.transportobserver.common.exception.Messages
 import org.slf4j.LoggerFactory
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
@@ -43,27 +44,27 @@ class WebSocketAuthChannelInterceptor(
 
 		if (accessor.command == StompCommand.CONNECT) {
 			val header = accessor.getFirstNativeHeader("Authorization")
-				?: throw AuthenticationCredentialsNotFoundException("Missing Authorization header on STOMP CONNECT")
+				?: throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-missing-authorization"))
 
 			if (!header.startsWith("Bearer ")) {
-				throw AuthenticationCredentialsNotFoundException("Malformed Authorization header on STOMP CONNECT")
+				throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-malformed-authorization"))
 			}
 
 			val token = header.substringAfter("Bearer ").trim()
 			val claims = jwtService.parse(token)
-				?: throw AuthenticationCredentialsNotFoundException("Invalid or expired STOMP CONNECT token")
+				?: throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-invalid-token"))
 
 			val username = claims["username"] as? String
-				?: throw AuthenticationCredentialsNotFoundException("Token missing username claim")
+				?: throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-missing-username-claim"))
 
 			val userDetails = try {
 				userDetailsService.loadUserByUsername(username)
 			} catch (ex: UsernameNotFoundException) {
-				throw AuthenticationCredentialsNotFoundException("Unknown account for STOMP CONNECT", ex)
+				throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-unknown-account"), ex)
 			}
 
 			if (!userDetails.isEnabled || !userDetails.isAccountNonLocked) {
-				throw AuthenticationCredentialsNotFoundException("Account disabled or locked")
+				throw AuthenticationCredentialsNotFoundException(Messages.resolve("error.auth.ws-account-disabled-or-locked"))
 			}
 
 			val authToken = UsernamePasswordAuthenticationToken(userDetails, null, userDetails.authorities)

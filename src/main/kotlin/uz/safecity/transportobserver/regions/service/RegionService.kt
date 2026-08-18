@@ -22,7 +22,7 @@ class RegionService(
 
 	fun getById(id: UUID): RegionDto {
 		val region = regionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Hudud topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.region.not-found", id) }
 		return RegionDto.from(region)
 	}
 
@@ -30,7 +30,7 @@ class RegionService(
 	fun create(request: CreateRegionRequest): RegionDto {
 		val trimmedName = request.name.trim()
 		if (regionRepository.existsByName(trimmedName)) {
-			throw ConflictException("Hudud allaqachon mavjud: $trimmedName")
+			throw ConflictException("error.region.already-exists", trimmedName)
 		}
 		val region = regionRepository.save(
 			Region(
@@ -44,11 +44,11 @@ class RegionService(
 	@Transactional
 	fun update(id: UUID, request: UpdateRegionRequest): RegionDto {
 		val region = regionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Hudud topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.region.not-found", id) }
 
 		val trimmedName = request.name.trim()
 		if (region.name != trimmedName && regionRepository.existsByName(trimmedName)) {
-			throw ConflictException("Hudud allaqachon mavjud: $trimmedName")
+			throw ConflictException("error.region.already-exists", trimmedName)
 		}
 
 		region.name = trimmedName
@@ -60,7 +60,7 @@ class RegionService(
 	@Transactional
 	fun delete(id: UUID) {
 		val region = regionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Hudud topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.region.not-found", id) }
 		regionRepository.delete(region)
 	}
 }

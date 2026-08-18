@@ -22,7 +22,7 @@ class EmployeePositionService(
 
 	fun getById(id: UUID): EmployeePositionDto {
 		val position = employeePositionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Lavozim topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.position.not-found", id) }
 		return EmployeePositionDto.from(position)
 	}
 
@@ -30,7 +30,7 @@ class EmployeePositionService(
 	fun create(request: CreateEmployeePositionRequest): EmployeePositionDto {
 		val trimmedName = request.name.trim()
 		if (employeePositionRepository.existsByName(trimmedName)) {
-			throw ConflictException("Lavozim allaqachon mavjud: $trimmedName")
+			throw ConflictException("error.position.already-exists", trimmedName)
 		}
 		val position = employeePositionRepository.save(
 			EmployeePosition(
@@ -44,11 +44,11 @@ class EmployeePositionService(
 	@Transactional
 	fun update(id: UUID, request: UpdateEmployeePositionRequest): EmployeePositionDto {
 		val position = employeePositionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Lavozim topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.position.not-found", id) }
 
 		val trimmedName = request.name.trim()
 		if (position.name != trimmedName && employeePositionRepository.existsByName(trimmedName)) {
-			throw ConflictException("Lavozim allaqachon mavjud: $trimmedName")
+			throw ConflictException("error.position.already-exists", trimmedName)
 		}
 
 		position.name = trimmedName
@@ -60,7 +60,7 @@ class EmployeePositionService(
 	@Transactional
 	fun delete(id: UUID) {
 		val position = employeePositionRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Lavozim topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.position.not-found", id) }
 		employeePositionRepository.delete(position)
 	}
 }

@@ -91,7 +91,7 @@ class VehicleService(
 	}
 
 	private fun findOrThrow(id: UUID): Vehicle =
-		vehicleRepository.findById(id).orElseThrow { ResourceNotFoundException("Transport vositasi topilmadi: $id") }
+		vehicleRepository.findById(id).orElseThrow { ResourceNotFoundException("error.vehicle.not-found", id) }
 
 	/** Field-level 409 message, same shape as EmployeeService's username-conflict check, so the frontend can parse it identically. */
 	private fun assertPlateNumberAvailable(plateNumber: String, excludingId: UUID? = null) {
@@ -101,7 +101,7 @@ class VehicleService(
 			vehicleRepository.existsByPlateNumberIgnoreCaseAndIdNot(plateNumber, excludingId)
 		}
 		if (conflict) {
-			throw ConflictException("Davlat raqami allaqachon band: $plateNumber")
+			throw ConflictException("error.vehicle.plate-taken", plateNumber)
 		}
 	}
 
@@ -109,9 +109,9 @@ class VehicleService(
 	private fun assertAssignedEmployeeIsActive(assignedEmployeeId: UUID?) {
 		if (assignedEmployeeId == null) return
 		val employee = employeeRepository.findById(assignedEmployeeId)
-			.orElseThrow { BadRequestException("Biriktirilgan xodim topilmadi: $assignedEmployeeId") }
+			.orElseThrow { BadRequestException("error.vehicle.assigned-employee-not-found", assignedEmployeeId) }
 		if (employee.status != EmployeeStatus.ACTIVE) {
-			throw BadRequestException("Biriktirilgan xodim faol emas: $assignedEmployeeId")
+			throw BadRequestException("error.vehicle.assigned-employee-inactive", assignedEmployeeId)
 		}
 	}
 

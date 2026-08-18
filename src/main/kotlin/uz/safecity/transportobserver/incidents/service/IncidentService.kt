@@ -91,7 +91,7 @@ class IncidentService(
 			incidentRepository.findById(id)
 		}
 		return incident.map { toDto(it) }
-			.orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 	}
 
 	/**
@@ -179,15 +179,15 @@ class IncidentService(
 		assertCanAssignInspector(actorRole)
 
 		val incident = incidentRepository.findById(id)
-			.orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $id") }
+			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 
 		val inspectorAccount = accountRepository.findById(inspectorAccountId)
-			.orElseThrow { BadRequestException("Inspektor hisobi topilmadi: $inspectorAccountId") }
+			.orElseThrow { BadRequestException("error.incident.assign-inspector-account-not-found", inspectorAccountId) }
 		if (inspectorAccount.role != RoleType.INSPECTOR) {
-			throw BadRequestException("Faqat INSPECTOR rolidagi hisobga tayinlash mumkin")
+			throw BadRequestException("error.incident.assign-role-invalid")
 		}
 		if (!inspectorAccount.isActive) {
-			throw BadRequestException("Nofaol inspektor hisobiga tayinlab bo'lmaydi")
+			throw BadRequestException("error.incident.assign-inspector-inactive")
 		}
 
 		incident.assignedInspectorId = inspectorAccountId
@@ -213,7 +213,7 @@ class IncidentService(
 	private fun assertCanAssignInspector(actorRole: RoleType) {
 		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR)
 		if (actorRole !in allowed) {
-			throw ForbiddenException("Inspektor tayinlashga ruxsatingiz yo'q")
+			throw ForbiddenException("error.incident.assign-forbidden")
 		}
 	}
 
@@ -235,12 +235,12 @@ class IncidentService(
 
 		val incident = if (actorRole == RoleType.INSPECTOR) {
 			val inspectorAccountId = actorAccountId
-				?: throw ForbiddenException("Hodisa statusini o'zgartirishga ruxsatingiz yo'q")
+				?: throw ForbiddenException("error.incident.status-change-forbidden")
 			incidentRepository.findByIdAndAssignedInspectorId(id, inspectorAccountId)
-				.orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $id") }
+				.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 		} else {
 			incidentRepository.findById(id)
-				.orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $id") }
+				.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 		}
 
 		incident.status = status
@@ -279,7 +279,7 @@ class IncidentService(
 	private fun assertCanUpdateStatus(actorRole: RoleType) {
 		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR, RoleType.INSPECTOR)
 		if (actorRole !in allowed) {
-			throw ForbiddenException("Hodisa statusini o'zgartirishga ruxsatingiz yo'q")
+			throw ForbiddenException("error.incident.status-change-forbidden")
 		}
 	}
 

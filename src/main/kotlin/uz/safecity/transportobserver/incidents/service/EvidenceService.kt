@@ -57,19 +57,19 @@ class EvidenceService(
 	): EvidenceDto {
 		findAccessible(incidentId, principal)
 
-		if (file.isEmpty) throw BadRequestException("Fayl bo'sh")
+		if (file.isEmpty) throw BadRequestException("error.evidence.file-empty")
 		if (file.size > MAX_FILE_SIZE_BYTES) {
-			throw BadRequestException("Fayl hajmi ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB dan oshmasligi kerak")
+			throw BadRequestException("error.evidence.file-too-large", MAX_FILE_SIZE_BYTES / (1024 * 1024))
 		}
 
 		val bytes = file.bytes
 		val sniffedType = sniffImageType(bytes)
-			?: throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+			?: throw BadRequestException("error.evidence.invalid-type")
 		// Belt-and-suspenders: the declared Content-Type (if present) must also claim to be one
 		// of the two allowed types — catches an obviously mislabeled upload even though the
 		// magic-number check above is the real gate.
 		if (file.contentType != null && file.contentType !in ALLOWED_MIME_TYPES) {
-			throw BadRequestException("Faqat JPEG yoki PNG rasm fayllariga ruxsat berilgan")
+			throw BadRequestException("error.evidence.invalid-type")
 		}
 
 		val extension = if (sniffedType == "image/png") "png" else "jpg"
@@ -116,7 +116,7 @@ class EvidenceService(
 		} else {
 			incidentRepository.findById(incidentId)
 		}
-		return incident.orElseThrow { ResourceNotFoundException("Hodisa topilmadi: $incidentId") }
+		return incident.orElseThrow { ResourceNotFoundException("error.incident.not-found", incidentId) }
 	}
 
 	/** Returns the sniffed MIME type ("image/jpeg"/"image/png"), or null if neither magic number matches. */
