@@ -9,6 +9,7 @@ import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.util.GeoUtils
+import uz.safecity.transportobserver.common.util.StatusTransitionValidator
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
 import uz.safecity.transportobserver.incidents.entity.Incident
@@ -225,9 +226,9 @@ class IncidentService(
 	 * INSPECTOR caller, never as 403 — consistent with the rest of this service's rule of not
 	 * confirming another inspector's incident even exists (see [getById] kdoc).
 	 *
-	 * No status-transition graph is enforced yet (e.g. RESOLVED -> NEW is currently allowed) —
-	 * see [uz.safecity.transportobserver.incidents.dto.UpdateIncidentStatusRequest] kdoc; this is
-	 * a deliberate TODO until the TZ defines the allowed transitions, not an oversight.
+	 * Status transitions follow [STATUS_TRANSITIONS] (see that constant's kdoc for the graph and
+	 * why NEW can never be re-entered). SUPER_ADMIN/ADMIN bypass the graph entirely — see
+	 * [assertValidTransition] kdoc — everyone else (OPERATOR/INSPECTOR) is held to it strictly.
 	 */
 	@Transactional
 	fun updateStatus(id: UUID, status: IncidentStatus, actorAccountId: UUID?, actorRole: RoleType): IncidentDto {
@@ -242,6 +243,8 @@ class IncidentService(
 			incidentRepository.findById(id)
 				.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 		}
+
+		assertValidTransition(incident.status, status, actorRole)
 
 		incident.status = status
 		val saved = incidentRepository.save(incident)
@@ -284,6 +287,26 @@ class IncidentService(
 	}
 
 	/**
+	 * SUPER_ADMIN/ADMIN bypass [STATUS_TRANSITIONS] entirely — a deliberate "fix a mistake" escape
+	 * hatch (e.g. an operator fat-fingered REJECTED when they meant RESOLVED) that a strict graph
+	 * would otherwise make impossible to correct without a DB console. OPERATOR/INSPECTOR — the
+	 * two roles that drive the day-to-day workflow — are held to the graph strictly, since they are
+	 * exactly the callers a state machine is meant to protect against ("misclick" reopening a
+	 * RESOLVED incident straight back to NEW, etc).
+	 */
+	private fun assertValidTransition(current: IncidentStatus, target: IncidentStatus, actorRole: RoleType) {
+		val bypass = actorRole == RoleType.SUPER_ADMIN || actorRole == RoleType.ADMIN
+		StatusTransitionValidator.assertAllowed(
+			current = current,
+			target = target,
+			allowedTransitions = STATUS_TRANSITIONS,
+			bypass = bypass
+		) {
+			throw BadRequestException("error.incident.invalid-status-transition", current, target)
+		}
+	}
+
+	/**
 	 * INSPECTOR scoping is folded into the same [Specification] as the status/type/
 	 * assignedInspectorId filters (rather than, say, filtering the Page afterwards) so
 	 * pagination totals stay correct and an INSPECTOR can never end up with a wider result
@@ -309,4 +332,22 @@ class IncidentService(
 
 			cb.and(*predicates.toTypedArray())
 		}
+
+	companion object {
+		/**
+		 * The incident workflow state machine (OPERATOR/INSPECTOR-enforced — see
+		 * [assertValidTransition]): `NEW -> IN_PROGRESS -> (RESOLVED | REJECTED)`, with RESOLVED/REJECTED
+		 * allowed to reopen back to IN_PROGRESS (e.g. a resolved case turns out to need more work).
+		 * [IncidentStatus.NEW] is deliberately unreachable as a *target* from anywhere (no entry maps
+		 * TO it) — "reopen" always means IN_PROGRESS, never back to the pre-triage NEW state, since NEW
+		 * specifically means "nobody has looked at this yet", which is never true once a status change
+		 * has happened at all.
+		 */
+		private val STATUS_TRANSITIONS: Map<IncidentStatus, Set<IncidentStatus>> = mapOf(
+			IncidentStatus.NEW to setOf(IncidentStatus.IN_PROGRESS),
+			IncidentStatus.IN_PROGRESS to setOf(IncidentStatus.RESOLVED, IncidentStatus.REJECTED),
+			IncidentStatus.RESOLVED to setOf(IncidentStatus.IN_PROGRESS),
+			IncidentStatus.REJECTED to setOf(IncidentStatus.IN_PROGRESS)
+		)
+	}
 }

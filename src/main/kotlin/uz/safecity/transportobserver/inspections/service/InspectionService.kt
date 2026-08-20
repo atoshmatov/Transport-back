@@ -10,6 +10,7 @@ import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
+import uz.safecity.transportobserver.common.util.StatusTransitionValidator
 import uz.safecity.transportobserver.inspections.dto.CreateInspectionRequest
 import uz.safecity.transportobserver.inspections.dto.InspectionDto
 import uz.safecity.transportobserver.inspections.entity.Inspection
@@ -136,6 +137,10 @@ class InspectionService(
 	 * When [status] is [InspectionStatus.COMPLETED] and [Inspection.performedAt] is not already
 	 * set, it is auto-filled with the current time — the caller does not need to (and normally
 	 * cannot know to) pass it explicitly.
+	 *
+	 * Status transitions follow [STATUS_TRANSITIONS] (see that constant's kdoc for the graph).
+	 * SUPER_ADMIN/ADMIN bypass it entirely — see [assertValidTransition] kdoc — OPERATOR/INSPECTOR
+	 * are held to it strictly, mirroring [uz.safecity.transportobserver.incidents.service.IncidentService.assertValidTransition].
 	 */
 	@Transactional
 	fun updateStatus(id: UUID, status: InspectionStatus, notes: String?, actorAccountId: UUID?, actorRole: RoleType): InspectionDto {
@@ -150,6 +155,8 @@ class InspectionService(
 			inspectionRepository.findById(id)
 				.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 		}
+
+		assertValidTransition(inspection.status, status, actorRole)
 
 		inspection.status = status
 		notes?.let { inspection.notes = it }
@@ -188,6 +195,24 @@ class InspectionService(
 		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR, RoleType.INSPECTOR)
 		if (actorRole !in allowed) {
 			throw ForbiddenException("error.inspection.status-change-forbidden")
+		}
+	}
+
+	/**
+	 * SUPER_ADMIN/ADMIN bypass [STATUS_TRANSITIONS] entirely — same "fix a mistake" escape hatch as
+	 * [uz.safecity.transportobserver.incidents.service.IncidentService.assertValidTransition].
+	 * OPERATOR/INSPECTOR are held to the graph strictly.
+	 */
+	private fun assertValidTransition(current: InspectionStatus, target: InspectionStatus, actorRole: RoleType) {
+		val bypass = actorRole == RoleType.SUPER_ADMIN || actorRole == RoleType.ADMIN
+		StatusTransitionValidator.assertAllowed(
+			current = current,
+			target = target,
+			allowedTransitions = STATUS_TRANSITIONS,
+			wildcardTargets = setOf(InspectionStatus.CANCELLED),
+			bypass = bypass
+		) {
+			throw BadRequestException("error.inspection.invalid-status-transition", current, target)
 		}
 	}
 
@@ -232,4 +257,21 @@ class InspectionService(
 
 			cb.and(*predicates.toTypedArray())
 		}
+
+	companion object {
+		/**
+		 * The inspection workflow state machine (OPERATOR/INSPECTOR-enforced — see
+		 * [assertValidTransition]): a strictly linear `PLANNED -> IN_PROGRESS -> COMPLETED`, no
+		 * backward moves at all (unlike [uz.safecity.transportobserver.incidents.service.IncidentService],
+		 * an Inspection is a scheduled task, not a case that gets "reopened" — once performed, it
+		 * stays performed). [InspectionStatus.CANCELLED] is deliberately NOT a key/target here — it
+		 * is handled as a wildcard target in [assertValidTransition] instead, since "cancel this
+		 * task" must be reachable from ANY current status (PLANNED, IN_PROGRESS, and even an
+		 * already-COMPLETED inspection an admin/operator later needs to void).
+		 */
+		private val STATUS_TRANSITIONS: Map<InspectionStatus, Set<InspectionStatus>> = mapOf(
+			InspectionStatus.PLANNED to setOf(InspectionStatus.IN_PROGRESS),
+			InspectionStatus.IN_PROGRESS to setOf(InspectionStatus.COMPLETED)
+		)
+	}
 }
