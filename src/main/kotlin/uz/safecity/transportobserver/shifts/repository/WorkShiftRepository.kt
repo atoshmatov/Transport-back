@@ -64,4 +64,12 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 	 * IncidentService#list's evidence-count lookup).
 	 */
 	fun findByInspectorIdInAndEndedAtIsNull(inspectorIds: Collection<UUID>): List<WorkShift>
+
+	/**
+	 * Every still-open shift that started before [cutoff] — backs
+	 * [uz.safecity.transportobserver.shifts.service.WorkShiftCleanupJob], which auto-closes shifts
+	 * an inspector never explicitly ended (e.g. the mobile app was killed/lost connectivity
+	 * without calling `end`). See that class's kdoc for the staleness threshold and why.
+	 */
+	fun findByEndedAtIsNullAndStartedAtBefore(cutoff: Instant): List<WorkShift>
 }

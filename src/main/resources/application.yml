@@ -61,6 +61,12 @@ security:
   lockout:
     max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
     lock-duration-minutes: ${LOGIN_LOCK_DURATION_MINUTES:15}
+  rate-limit:
+    login:
+      # IP-level brute-force guard (LoginRateLimiter/LoginRateLimitFilter) — independent of the
+      # per-account lockout above, which alone doesn't stop one IP cycling through many usernames.
+      max-attempts: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:10}
+      window-seconds: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:60}
 
 storage:
   minio:

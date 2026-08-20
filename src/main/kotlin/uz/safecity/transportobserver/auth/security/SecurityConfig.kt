@@ -22,6 +22,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig(
 	private val jwtAuthenticationFilter: JwtAuthenticationFilter,
 	private val passwordChangeRequiredFilter: PasswordChangeRequiredFilter,
+	private val loginRateLimitFilter: LoginRateLimitFilter,
 	private val userDetailsService: CustomUserDetailsService,
 	// Comma-separated explicit origin list (app.cors.allowed-origins) — NOT a wildcard. Cookie-based
 	// refresh-token auth requires allowCredentials(true), and browsers reject the combination of
@@ -75,7 +76,15 @@ class SecurityConfig(
 					.anyRequest().authenticated()
 			}
 			.authenticationProvider(authenticationProvider())
+			// JwtAuthenticationFilter must be registered (addFilterBefore against a known Spring
+			// Security filter class) before anything else can position itself relative to IT —
+			// Spring Security's FilterOrderRegistration throws "does not have a registered order"
+			// otherwise. So this stays first, and the new rate-limit filter is placed relative to
+			// it afterward.
 			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
+			// Rate-limit login attempts before anything else touches the request — see
+			// LoginRateLimiter/LoginRateLimitFilter kdocs for why this sits ahead of JWT parsing.
+			.addFilterBefore(loginRateLimitFilter, JwtAuthenticationFilter::class.java)
 			.addFilterAfter(passwordChangeRequiredFilter, JwtAuthenticationFilter::class.java)
 
 		return http.build()
