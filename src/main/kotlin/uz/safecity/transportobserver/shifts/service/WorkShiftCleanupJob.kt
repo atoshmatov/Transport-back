@@ -37,19 +37,30 @@ class WorkShiftCleanupJob(
 	@Scheduled(fixedRate = ONE_HOUR_MILLIS)
 	@Transactional
 	fun closeStaleShifts() {
-		val cutoff = Instant.now().minus(STALE_AFTER)
-		val staleShifts = workShiftRepository.findByEndedAtIsNullAndStartedAtBefore(cutoff)
-		if (staleShifts.isEmpty()) return
+		// Explicit try/catch (rather than relying on Spring's default scheduled-task exception
+		// handler, which just swallows the exception) so a failure is always visible in the logs
+		// at ERROR level with a full stack trace — there's no monitoring/alerting on this job yet,
+		// so a silent swallow would mean stale shifts pile up with nobody noticing. Caught here
+		// (inside the @Transactional method) rather than in an outer wrapper method, since an
+		// outer wrapper would call this method via a plain self-invocation that bypasses Spring's
+		// transactional proxy entirely.
+		try {
+			val cutoff = Instant.now().minus(STALE_AFTER)
+			val staleShifts = workShiftRepository.findByEndedAtIsNullAndStartedAtBefore(cutoff)
+			if (staleShifts.isEmpty()) return
 
-		staleShifts.forEach { it.endedAt = it.startedAt.plus(STALE_AFTER) }
-		workShiftRepository.saveAll(staleShifts)
+			staleShifts.forEach { it.endedAt = it.startedAt.plus(STALE_AFTER) }
+			workShiftRepository.saveAll(staleShifts)
 
-		log.warn(
-			"Auto-closed {} stale work shift(s) open longer than {}h (inspectorIds={})",
-			staleShifts.size,
-			STALE_AFTER.toHours(),
-			staleShifts.map { it.inspectorId }
-		)
+			log.warn(
+				"Auto-closed {} stale work shift(s) open longer than {}h (inspectorIds={})",
+				staleShifts.size,
+				STALE_AFTER.toHours(),
+				staleShifts.map { it.inspectorId }
+			)
+		} catch (e: Exception) {
+			log.error("WorkShift cleanup failed", e)
+		}
 	}
 
 	companion object {

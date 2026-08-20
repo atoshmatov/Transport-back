@@ -6,6 +6,7 @@ import uz.safecity.transportobserver.common.exception.Messages
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -29,7 +30,8 @@ import org.springframework.web.filter.OncePerRequestFilter
 @Component
 class LoginRateLimitFilter(
 	private val loginRateLimiter: LoginRateLimiter,
-	private val objectMapper: ObjectMapper
+	private val objectMapper: ObjectMapper,
+	@Value("\${security.rate-limit.trust-forwarded-header:false}") private val trustForwardedHeader: Boolean
 ) : OncePerRequestFilter() {
 
 	override fun doFilterInternal(
@@ -61,21 +63,23 @@ class LoginRateLimitFilter(
 	}
 
 	/**
-	 * `X-Forwarded-For` first, since this app is expected to sit behind a reverse proxy/load
-	 * balancer in any real deployment (same assumption other reverse-proxy-aware code in this repo
-	 * makes); falls back to the raw socket address for local/dev where there's no proxy in front.
-	 * Trusting a client-supplied header for rate-limiting is a deliberate MVP trade-off — a
-	 * malicious client sitting directly in front of this app (no proxy) could spoof it to smear
-	 * attempts across fake IPs, but that requires network access this app isn't expected to be
-	 * exposed to directly in production (see `application-prod.yml`/deployment notes).
+	 * Trusts the client-supplied `X-Forwarded-For` header only when
+	 * `security.rate-limit.trust-forwarded-header` is explicitly enabled — that flag must only be
+	 * turned on once this app actually sits behind a reverse proxy/load balancer that sets (or
+	 * overwrites) the header itself. By default it's `false`, so this always falls back to
+	 * [HttpServletRequest.getRemoteAddr] — the real TCP peer address, which a client cannot spoof.
+	 * Trusting `X-Forwarded-For` unconditionally would let any direct client smear brute-force
+	 * attempts across fake IPs and bypass [LoginRateLimiter] entirely, since there's no guarantee
+	 * this app is deployed behind a proxy that validates/rewrites that header.
 	 */
 	private fun clientIp(request: HttpServletRequest): String {
-		val forwardedFor = request.getHeader("X-Forwarded-For")
-		return if (!forwardedFor.isNullOrBlank()) {
-			forwardedFor.split(",").first().trim()
-		} else {
-			request.remoteAddr
+		if (trustForwardedHeader) {
+			val forwardedFor = request.getHeader("X-Forwarded-For")
+			if (!forwardedFor.isNullOrBlank()) {
+				return forwardedFor.split(",").first().trim()
+			}
 		}
+		return request.remoteAddr
 	}
 
 	companion object {

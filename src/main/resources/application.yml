@@ -67,6 +67,12 @@ security:
       # per-account lockout above, which alone doesn't stop one IP cycling through many usernames.
       max-attempts: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:10}
       window-seconds: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:60}
+    # Whether LoginRateLimitFilter trusts the client-supplied `X-Forwarded-For` header when
+    # deriving the per-IP rate-limit key. Defaults to false (safe side): without a reverse proxy
+    # verifying/overwriting this header, any direct client can spoof it to smear brute-force
+    # attempts across fake IPs and dodge the limiter entirely. Flip to true only once this app is
+    # actually deployed behind a reverse proxy/load balancer that sets X-Forwarded-For itself.
+    trust-forwarded-header: ${RATE_LIMIT_TRUST_FORWARDED_HEADER:false}
 
 storage:
   minio:
