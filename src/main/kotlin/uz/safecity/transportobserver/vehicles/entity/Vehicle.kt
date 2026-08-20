@@ -10,6 +10,9 @@ import java.util.UUID
 
 enum class VehicleType { CAR, BUS, TRUCK, MOTORCYCLE, SPECIAL, OTHER }
 
+/** Owner category — "jismoniy shaxs" (individual) vs "yuridik shaxs" (legal entity), as surfaced on the frontend's add-vehicle form. */
+enum class VehicleOwnerType { INDIVIDUAL, LEGAL_ENTITY }
+
 /**
  * Master registry row for a transport vehicle (TZ section 6, "Nazorat/transport"
  * group — `GET/POST /checkpoints, /vehicles`). Same shape/pattern as
@@ -63,6 +66,11 @@ class Vehicle(
 	// TODO (region module): text field until a real `regions` table exists — see kdoc above.
 	@Column(name = "region_name")
 	var regionName: String? = null,
+
+	/** "Jismoniy shaxs" vs "yuridik shaxs" — nullable since older rows predate this field. */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "owner_type", length = 32)
+	var ownerType: VehicleOwnerType? = null,
 
 	/** Employee.id — organizational assignment only, see class kdoc. */
 	@Column(name = "assigned_employee_id")

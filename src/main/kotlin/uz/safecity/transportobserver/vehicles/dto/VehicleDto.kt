@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.vehicles.dto
 
 import uz.safecity.transportobserver.vehicles.entity.Vehicle
+import uz.safecity.transportobserver.vehicles.entity.VehicleOwnerType
 import uz.safecity.transportobserver.vehicles.entity.VehicleType
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
@@ -15,6 +16,7 @@ data class VehicleDto(
 	val type: VehicleType,
 	val model: String?,
 	val regionName: String?,
+	val ownerType: VehicleOwnerType?,
 	val assignedEmployeeId: UUID?,
 	val isActive: Boolean,
 	val updatedAt: Instant?
@@ -26,6 +28,7 @@ data class VehicleDto(
 			type = vehicle.type,
 			model = vehicle.model,
 			regionName = vehicle.regionName,
+			ownerType = vehicle.ownerType,
 			assignedEmployeeId = vehicle.assignedEmployeeId,
 			isActive = vehicle.isActive,
 			updatedAt = vehicle.updatedAt
@@ -46,6 +49,9 @@ data class CreateVehicleRequest(
 	// TODO (region module): text field until a real `regions` table exists — see Vehicle kdoc.
 	val regionName: String? = null,
 
+	/** "Jismoniy shaxs" (INDIVIDUAL) vs "yuridik shaxs" (LEGAL_ENTITY); nullable/optional. */
+	val ownerType: VehicleOwnerType? = null,
+
 	/** Employee.id — see Vehicle kdoc re: not Account.id. */
 	val assignedEmployeeId: UUID? = null
 )
@@ -61,6 +67,7 @@ data class UpdateVehicleRequest(
 
 	val model: String? = null,
 	val regionName: String? = null,
+	val ownerType: VehicleOwnerType? = null,
 	val assignedEmployeeId: UUID? = null
 )
 

@@ -62,6 +62,7 @@ class VehicleService(
 			type = requireNotNull(request.type) { "type majburiy" },
 			model = request.model,
 			regionName = request.regionName,
+			ownerType = request.ownerType,
 			assignedEmployeeId = request.assignedEmployeeId
 		)
 		return VehicleDto.from(vehicleRepository.save(vehicle))
@@ -78,6 +79,7 @@ class VehicleService(
 		vehicle.type = requireNotNull(request.type) { "type majburiy" }
 		vehicle.model = request.model
 		vehicle.regionName = request.regionName
+		vehicle.ownerType = request.ownerType
 		vehicle.assignedEmployeeId = request.assignedEmployeeId
 		return VehicleDto.from(vehicleRepository.save(vehicle))
 	}
