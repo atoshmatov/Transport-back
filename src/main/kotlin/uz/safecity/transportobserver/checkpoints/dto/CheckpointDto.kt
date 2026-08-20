@@ -1,5 +1,6 @@
 package uz.safecity.transportobserver.checkpoints.dto
 
+import uz.safecity.transportobserver.checkpointtypes.entity.CheckpointType
 import uz.safecity.transportobserver.checkpoints.entity.Checkpoint
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
@@ -16,11 +17,22 @@ data class CheckpointDto(
 	val longitude: Double,
 	val description: String?,
 	val isActive: Boolean,
+	/** @deprecated legacy free-text category — see [Checkpoint.type] kdoc. Prefer [checkpointTypeId]/[checkpointTypeName]. */
+	@Deprecated("Use checkpointTypeId/checkpointTypeName instead.")
 	val type: String?,
+	val checkpointTypeId: UUID?,
+	val checkpointTypeName: String?,
 	val updatedAt: Instant?
 ) {
 	companion object {
-		fun from(checkpoint: Checkpoint) = CheckpointDto(
+		/**
+		 * [checkpointType] is the already-resolved [CheckpointType] row for
+		 * [Checkpoint.checkpointTypeId] (or `null` if unset/not found) — callers
+		 * batch-fetch it (single/list) so this stays a pure mapping function with
+		 * no repository access of its own. See [uz.safecity.transportobserver.checkpoints.service.CheckpointService].
+		 */
+		@Suppress("DEPRECATION")
+		fun from(checkpoint: Checkpoint, checkpointType: CheckpointType? = null) = CheckpointDto(
 			id = requireNotNull(checkpoint.id),
 			name = checkpoint.name,
 			regionName = checkpoint.regionName,
@@ -29,6 +41,8 @@ data class CheckpointDto(
 			description = checkpoint.description,
 			isActive = checkpoint.isActive,
 			type = checkpoint.type,
+			checkpointTypeId = checkpoint.checkpointTypeId,
+			checkpointTypeName = checkpointType?.name,
 			updatedAt = checkpoint.updatedAt
 		)
 	}
@@ -49,7 +63,13 @@ data class CreateCheckpointRequest(
 	val longitude: Double?,
 
 	val description: String? = null,
-	val type: String? = null
+
+	/** @deprecated legacy free-text category, ignored when [checkpointTypeId] is set — see [Checkpoint.type] kdoc. */
+	@Deprecated("Use checkpointTypeId instead.")
+	val type: String? = null,
+
+	/** Admin-selected [uz.safecity.transportobserver.checkpointtypes.entity.CheckpointType] id — the replacement for [type]. */
+	val checkpointTypeId: UUID? = null
 )
 
 /** isActive is intentionally excluded — changed only via `PATCH /{id}/status`. */
@@ -67,7 +87,13 @@ data class UpdateCheckpointRequest(
 	val longitude: Double?,
 
 	val description: String? = null,
-	val type: String? = null
+
+	/** @deprecated legacy free-text category, ignored when [checkpointTypeId] is set — see [Checkpoint.type] kdoc. */
+	@Deprecated("Use checkpointTypeId instead.")
+	val type: String? = null,
+
+	/** Admin-selected [uz.safecity.transportobserver.checkpointtypes.entity.CheckpointType] id — the replacement for [type]. */
+	val checkpointTypeId: UUID? = null
 )
 
 data class UpdateCheckpointStatusRequest(

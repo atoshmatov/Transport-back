@@ -5,6 +5,8 @@ import uz.safecity.transportobserver.checkpoints.dto.CreateCheckpointRequest
 import uz.safecity.transportobserver.checkpoints.dto.UpdateCheckpointRequest
 import uz.safecity.transportobserver.checkpoints.entity.Checkpoint
 import uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository
+import uz.safecity.transportobserver.checkpointtypes.entity.CheckpointType
+import uz.safecity.transportobserver.checkpointtypes.repository.CheckpointTypeRepository
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
@@ -21,13 +23,21 @@ import java.util.UUID
 
 @Service
 class CheckpointService(
-	private val checkpointRepository: CheckpointRepository
+	private val checkpointRepository: CheckpointRepository,
+	private val checkpointTypeRepository: CheckpointTypeRepository
 ) {
 
-	fun list(regionName: String?, type: String?, isActive: Boolean?, pageable: Pageable): PageResponse<CheckpointDto> {
-		val page = checkpointRepository.findAll(buildSpecification(regionName, type, isActive), pageable)
+	fun list(
+		regionName: String?,
+		type: String?,
+		isActive: Boolean?,
+		checkpointTypeId: UUID?,
+		pageable: Pageable
+	): PageResponse<CheckpointDto> {
+		val page = checkpointRepository.findAll(buildSpecification(regionName, type, isActive, checkpointTypeId), pageable)
+		val typesById = checkpointTypesById(page.content)
 		return PageResponse(
-			content = page.content.map { CheckpointDto.from(it) },
+			content = page.content.map { CheckpointDto.from(it, typesById[it.checkpointTypeId]) },
 			page = page.number,
 			size = page.size,
 			totalElements = page.totalElements,
@@ -35,40 +45,52 @@ class CheckpointService(
 		)
 	}
 
-	fun getById(id: UUID): CheckpointDto = CheckpointDto.from(findOrThrow(id))
+	fun getById(id: UUID): CheckpointDto {
+		val checkpoint = findOrThrow(id)
+		return CheckpointDto.from(checkpoint, checkpoint.checkpointTypeId?.let { checkpointTypeRepository.findById(it).orElse(null) })
+	}
 
 	/**
 	 * Consumed by [uz.safecity.transportobserver.map.controller.MapController]'s
 	 * `GET /api/v1/map/checkpoints` — every authenticated role (incl. INSPECTOR)
 	 * may see active checkpoints on the map, unlike [list] which is Admin/Operator only.
 	 */
-	fun listActiveForMap(): List<CheckpointDto> =
-		checkpointRepository.findByIsActiveTrue().map { CheckpointDto.from(it) }
+	fun listActiveForMap(): List<CheckpointDto> {
+		val checkpoints = checkpointRepository.findByIsActiveTrue()
+		val typesById = checkpointTypesById(checkpoints)
+		return checkpoints.map { CheckpointDto.from(it, typesById[it.checkpointTypeId]) }
+	}
 
 	/** Consumed by InspectorPanelService for `DashboardSummaryDto.activeCheckpointsCount`. */
 	fun countActive(): Long = checkpointRepository.countByIsActiveTrue()
 
 	@Transactional
 	fun create(request: CreateCheckpointRequest): CheckpointDto {
+		val checkpointType = resolveCheckpointType(request.checkpointTypeId)
+		@Suppress("DEPRECATION")
 		val checkpoint = Checkpoint(
 			name = request.name,
 			regionName = request.regionName,
 			location = toPoint(request.latitude, request.longitude),
 			description = request.description,
-			type = request.type
+			type = request.type,
+			checkpointTypeId = request.checkpointTypeId
 		)
-		return CheckpointDto.from(checkpointRepository.save(checkpoint))
+		return CheckpointDto.from(checkpointRepository.save(checkpoint), checkpointType)
 	}
 
 	@Transactional
 	fun update(id: UUID, request: UpdateCheckpointRequest): CheckpointDto {
 		val checkpoint = findOrThrow(id)
+		val checkpointType = resolveCheckpointType(request.checkpointTypeId)
 		checkpoint.name = request.name
 		checkpoint.regionName = request.regionName
 		checkpoint.location = toPoint(request.latitude, request.longitude)
 		checkpoint.description = request.description
-		checkpoint.type = request.type
-		return CheckpointDto.from(checkpointRepository.save(checkpoint))
+		@Suppress("DEPRECATION")
+		run { checkpoint.type = request.type }
+		checkpoint.checkpointTypeId = request.checkpointTypeId
+		return CheckpointDto.from(checkpointRepository.save(checkpoint), checkpointType)
 	}
 
 	/** Soft-deactivate only — see [Checkpoint] kdoc re: why there is no hard-delete endpoint. */
@@ -76,18 +98,38 @@ class CheckpointService(
 	fun updateStatus(id: UUID, isActive: Boolean): CheckpointDto {
 		val checkpoint = findOrThrow(id)
 		checkpoint.isActive = isActive
-		return CheckpointDto.from(checkpointRepository.save(checkpoint))
+		val saved = checkpointRepository.save(checkpoint)
+		return CheckpointDto.from(saved, saved.checkpointTypeId?.let { checkpointTypeRepository.findById(it).orElse(null) })
 	}
 
 	private fun findOrThrow(id: UUID): Checkpoint =
 		checkpointRepository.findById(id).orElseThrow { ResourceNotFoundException("error.checkpoint.not-found", id) }
 
-	private fun buildSpecification(regionName: String?, type: String?, isActive: Boolean?): Specification<Checkpoint> =
+	/** Validates the admin-selected type exists (404 otherwise); `null` is allowed — see [Checkpoint.checkpointTypeId] kdoc. */
+	private fun resolveCheckpointType(checkpointTypeId: UUID?): CheckpointType? =
+		checkpointTypeId?.let {
+			checkpointTypeRepository.findById(it)
+				.orElseThrow { ResourceNotFoundException("error.checkpoint-type.not-found", it) }
+		}
+
+	/** Batched lookup for list/map enrichment — one query per page instead of one per row (same pattern as EmployeeService's onDutyIds batching). */
+	private fun checkpointTypesById(checkpoints: List<Checkpoint>): Map<UUID, CheckpointType> {
+		val ids = checkpoints.mapNotNull { it.checkpointTypeId }.toSet()
+		return checkpointTypeRepository.findByIdIn(ids).associateBy { requireNotNull(it.id) }
+	}
+
+	private fun buildSpecification(
+		regionName: String?,
+		type: String?,
+		isActive: Boolean?,
+		checkpointTypeId: UUID?
+	): Specification<Checkpoint> =
 		Specification { root, _, cb ->
 			val predicates = mutableListOf<Predicate>()
 			regionName?.let { predicates.add(cb.equal(root.get<String>("regionName"), it)) }
 			type?.let { predicates.add(cb.equal(root.get<String>("type"), it)) }
 			isActive?.let { predicates.add(cb.equal(root.get<Boolean>("isActive"), it)) }
+			checkpointTypeId?.let { predicates.add(cb.equal(root.get<UUID>("checkpointTypeId"), it)) }
 			cb.and(*predicates.toTypedArray())
 		}
 

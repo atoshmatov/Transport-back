@@ -42,9 +42,10 @@ class CheckpointController(
 		@RequestParam(required = false) regionName: String?,
 		@RequestParam(required = false) type: String?,
 		@RequestParam(required = false) isActive: Boolean?,
+		@RequestParam(required = false) checkpointTypeId: UUID?,
 		@PageableDefault(size = 20) pageable: Pageable
 	): ResponseEntity<ApiResponse<PageResponse<CheckpointDto>>> =
-		ResponseEntity.ok(ApiResponse.ok(checkpointService.list(regionName, type, isActive, pageable)))
+		ResponseEntity.ok(ApiResponse.ok(checkpointService.list(regionName, type, isActive, checkpointTypeId, pageable)))
 
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
 	@GetMapping("/{id}")
