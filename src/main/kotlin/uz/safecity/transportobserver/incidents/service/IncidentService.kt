@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.incidents.service
 
 import uz.safecity.transportobserver.audit.service.AuditService
+import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
@@ -10,6 +11,7 @@ import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.util.GeoUtils
 import uz.safecity.transportobserver.common.util.StatusTransitionValidator
+import uz.safecity.transportobserver.employees.repository.EmployeeRepository
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
 import uz.safecity.transportobserver.incidents.entity.Incident
@@ -43,6 +45,7 @@ class IncidentService(
 	private val incidentRepository: IncidentRepository,
 	private val evidenceRepository: EvidenceRepository,
 	private val accountRepository: AccountRepository,
+	private val employeeRepository: EmployeeRepository,
 	private val auditService: AuditService
 ) {
 
@@ -73,8 +76,13 @@ class IncidentService(
 		} else {
 			evidenceRepository.countGroupByIncidentIds(ids).associate { it.incidentId to it.cnt }
 		}
+		// Batched name lookup (one Account query + one Employee query for the whole page) instead
+		// of one round-trip per row — same batching rationale as evidenceCountsById above.
+		val namesByInspectorId = resolveInspectorNames(page.content.mapNotNull { it.assignedInspectorId })
 		return PageResponse(
-			content = page.content.map { IncidentDto.from(it, evidenceCountsById[it.id] ?: 0) },
+			content = page.content.map {
+				IncidentDto.from(it, evidenceCountsById[it.id] ?: 0, namesByInspectorId[it.assignedInspectorId])
+			},
 			page = page.number,
 			size = page.size,
 			totalElements = page.totalElements,
@@ -122,9 +130,16 @@ class IncidentService(
 	 * always the caller. `assignedInspectorId` auto-assigns to the caller ONLY when they are an
 	 * INSPECTOR: they just reported the incident, so it's mechanically simplest and matches "see
 	 * my own report immediately" for them to already be its assignee, rather than making them
-	 * wait for a SUPER_ADMIN/ADMIN/OPERATOR to run `PATCH /{id}/assign` back to themselves. Any
-	 * other caller role (Operator manual entry, per TZ's permission-matrix "qo'lda") leaves it
-	 * unassigned — exactly today's default — so it goes through the normal dispatch flow.
+	 * wait for a SUPER_ADMIN/ADMIN/OPERATOR to run `PATCH /{id}/assign` back to themselves.
+	 *
+	 * For SUPER_ADMIN/ADMIN/OPERATOR, [CreateIncidentRequest.assignedInspectorId] — if present —
+	 * assigns an inspector in this same call (the web "hodisa yaratish" form's one-step path),
+	 * validated with the exact same rules as the standalone [assignInspector] (must exist, must be
+	 * an active INSPECTOR account — see [validateAssignableInspector]). Omitted/null leaves it
+	 * unassigned — exactly today's default — so it goes through the normal dispatch flow via
+	 * `PATCH /{id}/assign` later. An INSPECTOR caller's [CreateIncidentRequest.assignedInspectorId]
+	 * (if sent at all) is ignored outright: they always auto-assign to themselves, never to a
+	 * third party, from the create endpoint.
 	 */
 	@Transactional
 	fun create(request: CreateIncidentRequest, principal: CustomUserDetails): IncidentDto {
@@ -138,6 +153,12 @@ class IncidentService(
 			}
 		}
 
+		val assignOnCreateInspectorId = if (principal.role != RoleType.INSPECTOR) {
+			request.assignedInspectorId?.also { validateAssignableInspector(it) }
+		} else {
+			null
+		}
+
 		val incident = Incident(
 			title = request.title,
 			description = request.description,
@@ -146,7 +167,7 @@ class IncidentService(
 			location = GeoUtils.toPointOrNull(request.latitude, request.longitude),
 			reportedBy = principal.accountId,
 			occurredAt = request.occurredAt ?: Instant.now(),
-			assignedInspectorId = if (principal.role == RoleType.INSPECTOR) principal.accountId else null,
+			assignedInspectorId = if (principal.role == RoleType.INSPECTOR) principal.accountId else assignOnCreateInspectorId,
 			regionName = null,
 			clientUuid = request.clientUuid
 		)
@@ -161,7 +182,11 @@ class IncidentService(
 		)
 
 		// Freshly created — never has evidence yet, no need for a query.
-		return IncidentDto.from(saved, evidenceCount = 0)
+		return IncidentDto.from(
+			saved,
+			evidenceCount = 0,
+			assignedInspectorName = saved.assignedInspectorId?.let { resolveInspectorNames(listOf(it))[it] }
+		)
 	}
 
 	/**
@@ -182,14 +207,7 @@ class IncidentService(
 		val incident = incidentRepository.findById(id)
 			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 
-		val inspectorAccount = accountRepository.findById(inspectorAccountId)
-			.orElseThrow { BadRequestException("error.incident.assign-inspector-account-not-found", inspectorAccountId) }
-		if (inspectorAccount.role != RoleType.INSPECTOR) {
-			throw BadRequestException("error.incident.assign-role-invalid")
-		}
-		if (!inspectorAccount.isActive) {
-			throw BadRequestException("error.incident.assign-inspector-inactive")
-		}
+		validateAssignableInspector(inspectorAccountId)
 
 		incident.assignedInspectorId = inspectorAccountId
 		val saved = incidentRepository.save(incident)
@@ -203,6 +221,47 @@ class IncidentService(
 		)
 
 		return toDto(saved)
+	}
+
+	/**
+	 * Shared validation for both the standalone [assignInspector] (`PATCH /{id}/assign`) and the
+	 * assign-on-create path in [create] — an [inspectorAccountId] is only assignable when it
+	 * resolves to an existing, active, INSPECTOR-role [Account]. Returns the validated account
+	 * (unused by callers today, but avoids a second lookup if a future caller needs it).
+	 */
+	private fun validateAssignableInspector(inspectorAccountId: UUID): Account {
+		val inspectorAccount = accountRepository.findById(inspectorAccountId)
+			.orElseThrow { BadRequestException("error.incident.assign-inspector-account-not-found", inspectorAccountId) }
+		if (inspectorAccount.role != RoleType.INSPECTOR) {
+			throw BadRequestException("error.incident.assign-role-invalid")
+		}
+		if (!inspectorAccount.isActive) {
+			throw BadRequestException("error.incident.assign-inspector-inactive")
+		}
+		return inspectorAccount
+	}
+
+	/**
+	 * Resolves [Account.id] -> [uz.safecity.transportobserver.employees.entity.Employee.fullName]
+	 * for a batch of `assignedInspectorId` values, in exactly 2 queries total regardless of batch
+	 * size (one `findAllById` on Account, one on Employee) — see [IncidentDto.assignedInspectorName]
+	 * kdoc for why this hop through Account.employeeId is needed. Missing/legacy accounts (no
+	 * linked Employee row) are simply absent from the returned map rather than erroring.
+	 */
+	private fun resolveInspectorNames(assignedInspectorIds: Collection<UUID>): Map<UUID, String> {
+		val ids = assignedInspectorIds.distinct()
+		if (ids.isEmpty()) return emptyMap()
+		val accounts = accountRepository.findAllById(ids)
+		val employeeIds = accounts.mapNotNull { it.employeeId }
+		if (employeeIds.isEmpty()) return emptyMap()
+		val fullNameByEmployeeId = employeeRepository.findAllById(employeeIds)
+			.mapNotNull { employee -> employee.id?.let { it to employee.fullName } }
+			.toMap()
+		return accounts.mapNotNull { account ->
+			val employeeId = account.employeeId ?: return@mapNotNull null
+			val fullName = fullNameByEmployeeId[employeeId] ?: return@mapNotNull null
+			requireNotNull(account.id) to fullName
+		}.toMap()
 	}
 
 	/**
@@ -271,7 +330,11 @@ class IncidentService(
 
 	/** Single-row DTO with an accurate evidence count — see [list] kdoc for why that's a batch query there instead. */
 	private fun toDto(incident: Incident): IncidentDto =
-		IncidentDto.from(incident, evidenceRepository.countByIncidentId(requireNotNull(incident.id)))
+		IncidentDto.from(
+			incident,
+			evidenceRepository.countByIncidentId(requireNotNull(incident.id)),
+			incident.assignedInspectorId?.let { resolveInspectorNames(listOf(it))[it] }
+		)
 
 	/**
 	 * Defense-in-depth mirror of the controller's @PreAuthorize on

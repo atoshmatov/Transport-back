@@ -22,6 +22,15 @@ data class IncidentDto(
 	val longitude: Double?,
 	val occurredAt: Instant?,
 	val assignedInspectorId: UUID?,
+	/**
+	 * [uz.safecity.transportobserver.employees.entity.Employee.fullName] of the account in
+	 * [assignedInspectorId], resolved via `Account.employeeId` (see IncidentService kdoc for why
+	 * that hop is needed — the incident stores the *account* id, not the employee id). Null when
+	 * unassigned, or (rare) when the assigned account has no linked Employee row. This exists so
+	 * the web admin board can show a name instead of a bare UUID next to "tayinlangan" — the raw
+	 * id alone was the gap that made assignment invisible/unusable from the web UI.
+	 */
+	val assignedInspectorName: String?,
 	// TODO (region module): text field until a real `regions` table exists — see Incident kdoc.
 	val regionName: String?,
 	/** Client-generated offline-dedup key, if this incident came from the mobile app — see Incident kdoc. */
@@ -37,7 +46,7 @@ data class IncidentDto(
 	val updatedAt: Instant?
 ) {
 	companion object {
-		fun from(incident: Incident, evidenceCount: Long = 0) = IncidentDto(
+		fun from(incident: Incident, evidenceCount: Long = 0, assignedInspectorName: String? = null) = IncidentDto(
 			id = requireNotNull(incident.id),
 			title = incident.title,
 			description = incident.description,
@@ -48,6 +57,7 @@ data class IncidentDto(
 			longitude = incident.location?.x,
 			occurredAt = incident.occurredAt,
 			assignedInspectorId = incident.assignedInspectorId,
+			assignedInspectorName = assignedInspectorName,
 			regionName = incident.regionName,
 			clientUuid = incident.clientUuid,
 			evidenceCount = evidenceCount,
@@ -68,6 +78,14 @@ data class IncidentDto(
  * client doesn't have yet" reasoning as [latitude]/[longitude] being independently optional).
  * Once the mobile client is fully migrated to send it on every report, product may decide to
  * tighten this to required — that is a client-rollout decision, not a backend one.
+ *
+ * [assignedInspectorId] lets SUPER_ADMIN/ADMIN/OPERATOR assign an inspector in the same call
+ * that creates the incident (the web "hodisa yaratish" form's one-step assign-on-create path) —
+ * see IncidentService#create kdoc. It is the INSPECTOR's *account* id (same as
+ * [AssignInspectorRequest.inspectorAccountId] on the separate `PATCH /{id}/assign` endpoint),
+ * not the Employee id — a frequent source of confusion, since the web employee roster's "id"
+ * field is usually the Employee id. Ignored entirely for an INSPECTOR caller, who always
+ * auto-assigns to themselves regardless of what (if anything) is sent here.
  */
 data class CreateIncidentRequest(
 	@field:NotBlank(message = "title majburiy")
@@ -89,7 +107,10 @@ data class CreateIncidentRequest(
 	val occurredAt: Instant? = null,
 
 	/** Client-generated UUID for offline dedup — see Incident.clientUuid kdoc. */
-	val clientUuid: UUID? = null
+	val clientUuid: UUID? = null,
+
+	/** SUPER_ADMIN/ADMIN/OPERATOR-only assign-on-create — see this class's kdoc above. */
+	val assignedInspectorId: UUID? = null
 )
 
 /** SUPER_ADMIN/ADMIN/OPERATOR only — see IncidentController#assignInspector. */
