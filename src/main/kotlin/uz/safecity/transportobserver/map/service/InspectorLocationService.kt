@@ -12,6 +12,7 @@ import uz.safecity.transportobserver.map.dto.EmployeeLocationDto
 import uz.safecity.transportobserver.map.dto.UpdateInspectorLocationRequest
 import uz.safecity.transportobserver.map.entity.InspectorLocation
 import uz.safecity.transportobserver.map.repository.InspectorLocationRepository
+import uz.safecity.transportobserver.shifts.service.WorkShiftService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -31,7 +32,8 @@ import java.util.UUID
 class InspectorLocationService(
 	private val inspectorLocationRepository: InspectorLocationRepository,
 	private val accountRepository: AccountRepository,
-	private val employeeRepository: EmployeeRepository
+	private val employeeRepository: EmployeeRepository,
+	private val workShiftService: WorkShiftService
 ) {
 
 	/**
@@ -104,6 +106,9 @@ class InspectorLocationService(
 
 		val employeeIds = accountsById.values.mapNotNull { it.employeeId }
 		val employeesById = employeeRepository.findAllById(employeeIds).associateBy { requireNotNull(it.id) }
+		// Independent of online/location — see EmployeeLocationDto.onDuty kdoc. One batched query
+		// for the whole map, same as accountsWithLocation/sessionActiveInspectors above.
+		val onDutyIds = workShiftService.onDutyInspectorIds(accountsById.keys)
 
 		return accountsById.map { (inspectorId, account) ->
 			val location = locationsByInspectorId[inspectorId]
@@ -111,7 +116,7 @@ class InspectorLocationService(
 			val online = PresenceUtils.isRecent(location?.updatedAt, now) ||
 				PresenceUtils.isRecent(account.lastActiveAt, now)
 			val lastSeenAt = PresenceUtils.latestOf(location?.updatedAt, account.lastActiveAt)
-			EmployeeLocationDto.from(inspectorId, location, employee, online, lastSeenAt)
+			EmployeeLocationDto.from(inspectorId, location, employee, online, inspectorId in onDutyIds, lastSeenAt)
 		}
 	}
 

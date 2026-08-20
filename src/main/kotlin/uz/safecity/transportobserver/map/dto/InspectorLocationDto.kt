@@ -38,6 +38,16 @@ data class UpdateInspectorLocationRequest(
  * [lastSeenAt] is the more recent of the two signals (`null` only in the never-should-happen case
  * where neither is present).
  *
+ * [onDuty] is a DIFFERENT, independent signal from [online] — see
+ * [uz.safecity.transportobserver.shifts.entity.WorkShift] kdoc: `true` iff the inspector has an
+ * open shift right now (explicit "ishga chiqdim" check-in via `POST
+ * /api/v1/inspector/me/shift/start`), computed in the same batched pass as everything else in
+ * [uz.safecity.transportobserver.map.service.InspectorLocationService.listEmployeeLocations] via
+ * [uz.safecity.transportobserver.shifts.service.WorkShiftService.onDutyInspectorIds]. An inspector
+ * can be `online = true, onDuty = false` (logged in but hasn't started their shift yet) or, in
+ * theory, `online = false, onDuty = true` (shift started, then session/GPS signal went stale) —
+ * frontend must show both independently, never derive one from the other.
+ *
  * [category]: the mockup's 4 buckets are exactly
  * [uz.safecity.transportobserver.checkpoints.entity.Checkpoint.type] values, per the existing
  * `GET /api/v1/reports/checkpoints-distribution` legend
@@ -56,6 +66,7 @@ data class EmployeeLocationDto(
 	val latitude: Double?,
 	val longitude: Double?,
 	val online: Boolean,
+	val onDuty: Boolean,
 	val lastSeenAt: Instant?,
 	val category: String?
 ) {
@@ -65,6 +76,7 @@ data class EmployeeLocationDto(
 			location: InspectorLocation?,
 			employee: Employee?,
 			online: Boolean,
+			onDuty: Boolean,
 			lastSeenAt: Instant?
 		) = EmployeeLocationDto(
 			inspectorId = inspectorId,
@@ -72,6 +84,7 @@ data class EmployeeLocationDto(
 			latitude = location?.location?.y,
 			longitude = location?.location?.x,
 			online = online,
+			onDuty = onDuty,
 			lastSeenAt = lastSeenAt,
 			// TODO (next task): no Inspector-Checkpoint assignment mechanism yet — see kdoc above.
 			category = null

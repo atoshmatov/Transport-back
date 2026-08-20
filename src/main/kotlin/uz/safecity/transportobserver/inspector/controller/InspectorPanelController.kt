@@ -11,7 +11,10 @@ import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
 import uz.safecity.transportobserver.inspector.service.InspectorPanelService
 import uz.safecity.transportobserver.map.dto.UpdateInspectorLocationRequest
 import uz.safecity.transportobserver.map.service.InspectorLocationService
+import uz.safecity.transportobserver.shifts.dto.WorkShiftDto
+import uz.safecity.transportobserver.shifts.service.WorkShiftService
 import jakarta.validation.Valid
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -26,13 +29,16 @@ import org.springframework.web.bind.annotation.RestController
  * INSPECTOR-only and scoped to the caller's own assigned incidents — see
  * [InspectorPanelService] kdoc for the scoping pattern. `/me/location` is
  * scoped the same way but backed by [InspectorLocationService] (`map` module)
- * instead — see that service's kdoc.
+ * instead — see that service's kdoc. `/me/shift/...` is backed by
+ * [WorkShiftService] (`shifts` module) — see [uz.safecity.transportobserver.shifts.entity.WorkShift]
+ * kdoc for how "on duty" (explicit shift check-in) differs from the `online` presence signal.
  */
 @RestController
 @RequestMapping("/api/v1/inspector")
 class InspectorPanelController(
 	private val inspectorPanelService: InspectorPanelService,
-	private val inspectorLocationService: InspectorLocationService
+	private val inspectorLocationService: InspectorLocationService,
+	private val workShiftService: WorkShiftService
 ) {
 
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
@@ -95,5 +101,31 @@ class InspectorPanelController(
 	): ResponseEntity<Void> {
 		inspectorLocationService.upsertMyLocation(principal, request)
 		return ResponseEntity.noContent().build()
+	}
+
+	/** "Ishga chiqdim" — opens a new shift. `409` (via [uz.safecity.transportobserver.common.exception.ConflictException]) if one is already open. */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@PostMapping("/me/shift/start")
+	fun startShift(
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<WorkShiftDto>> =
+		ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(workShiftService.startShift(principal)))
+
+	/** "Ishni tugatdim" — closes the caller's open shift. `409` if there is none. */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@PostMapping("/me/shift/end")
+	fun endShift(
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<WorkShiftDto>> =
+		ResponseEntity.ok(ApiResponse.ok(workShiftService.endShift(principal)))
+
+	/** `204 No Content` when there's no open shift — same "no meaningful body" convention as [updateMyLocation]. */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@GetMapping("/me/shift/current")
+	fun getCurrentShift(
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<WorkShiftDto>> {
+		val current = workShiftService.getCurrent(principal) ?: return ResponseEntity.noContent().build()
+		return ResponseEntity.ok(ApiResponse.ok(current))
 	}
 }

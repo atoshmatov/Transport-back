@@ -21,6 +21,7 @@ import uz.safecity.transportobserver.employees.dto.UpdateEmployeeRequest
 import uz.safecity.transportobserver.employees.entity.Employee
 import uz.safecity.transportobserver.employees.entity.EmployeeStatus
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
+import uz.safecity.transportobserver.shifts.service.WorkShiftService
 import jakarta.persistence.criteria.Predicate
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.domain.Specification
@@ -37,7 +38,8 @@ class EmployeeService(
 	private val temporaryPasswordGenerator: TemporaryPasswordGenerator,
 	private val authService: AuthService,
 	private val auditService: AuditService,
-	private val fileStorageService: FileStorageService
+	private val fileStorageService: FileStorageService,
+	private val workShiftService: WorkShiftService
 ) {
 
 	fun list(
@@ -63,9 +65,16 @@ class EmployeeService(
 
 		val accountsByEmployeeId = accountRepository.findByEmployeeIdIn(page.content.mapNotNull { it.id })
 			.associateBy { it.employeeId }
+		// Batched — one query for the whole page's onDuty flags, not one per row. Safe to pass every
+		// account id (not just INSPECTOR ones): a non-INSPECTOR account simply never has a WorkShift
+		// row, so it never comes back in the result — see WorkShiftService#onDutyInspectorIds kdoc.
+		val onDutyIds = workShiftService.onDutyInspectorIds(accountsByEmployeeId.values.mapNotNull { it.id })
 
 		return PageResponse(
-			content = page.content.map { EmployeeDto.from(it, accountsByEmployeeId[it.id], getPhotoUrl(it.photoKey)) },
+			content = page.content.map {
+				val account = accountsByEmployeeId[it.id]
+				EmployeeDto.from(it, account, getPhotoUrl(it.photoKey), onDuty = account?.id in onDutyIds)
+			},
 			page = page.number,
 			size = page.size,
 			totalElements = page.totalElements,
@@ -76,7 +85,8 @@ class EmployeeService(
 	fun getById(id: UUID): EmployeeDto {
 		val employee = findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id).orElse(null)
-		return EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey))
+		val onDuty = account?.id?.let { workShiftService.onDutyInspectorIds(listOf(it)).isNotEmpty() } ?: false
+		return EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey), onDuty = onDuty)
 	}
 
 	/** Creates the [Employee] row and its linked [Account] together. See [CreateEmployeeResponse] kdoc re: the one-time password. */

@@ -46,10 +46,20 @@ data class EmployeeDto(
 	 * `null` when there's no linked account at all (legacy row, see class kdoc above).
 	 */
 	val online: Boolean?,
-	val lastActiveAt: Instant?
+	val lastActiveAt: Instant?,
+	/**
+	 * `true` iff this employee is an INSPECTOR with a currently open
+	 * [uz.safecity.transportobserver.shifts.entity.WorkShift] (explicit "ishga chiqdim" check-in via
+	 * `POST /api/v1/inspector/me/shift/start`) — see that entity's kdoc for why this is a DIFFERENT,
+	 * independent signal from [online] (session-activity presence). Always `false` for a
+	 * non-INSPECTOR role or a legacy row with no linked account, never `null` — unlike [online]
+	 * there is no "no signal to speak of" case: an employee either currently has an open shift or
+	 * they don't.
+	 */
+	val onDuty: Boolean
 ) {
 	companion object {
-		fun from(employee: Employee, account: Account?, photoUrl: String? = null) = EmployeeDto(
+		fun from(employee: Employee, account: Account?, photoUrl: String? = null, onDuty: Boolean = false) = EmployeeDto(
 			id = requireNotNull(employee.id),
 			fullName = employee.fullName,
 			position = employee.position,
@@ -65,7 +75,8 @@ data class EmployeeDto(
 			mustChangePassword = account?.mustChangePassword,
 			photoUrl = photoUrl,
 			online = account?.let { PresenceUtils.isRecent(it.lastActiveAt) },
-			lastActiveAt = account?.lastActiveAt
+			lastActiveAt = account?.lastActiveAt,
+			onDuty = onDuty
 		)
 	}
 }
