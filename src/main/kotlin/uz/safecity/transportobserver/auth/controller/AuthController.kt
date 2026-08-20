@@ -76,11 +76,19 @@ class AuthController(
 		return ResponseEntity.noContent().build()
 	}
 
-	/** ADMIN/SUPER_ADMIN only — enforced both here and in SecurityConfig's authorizeHttpRequests. */
+	/**
+	 * ADMIN/SUPER_ADMIN only — enforced both here and in SecurityConfig's authorizeHttpRequests.
+	 * That is only the coarse "may call this endpoint at all" gate; the actor-vs-target role
+	 * hierarchy (an ADMIN may not reset another ADMIN's or SUPER_ADMIN's password) is enforced
+	 * inside [AuthService.resetPassword] via `RoleHierarchyGuard` — see that method's kdoc.
+	 */
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN')")
 	@PostMapping("/reset-password")
 	fun resetPassword(
-		@Valid @RequestBody request: ResetPasswordRequest
+		@Valid @RequestBody request: ResetPasswordRequest,
+		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<ResetPasswordResponse>> =
-		ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(authService.resetPassword(request.accountId)))
+		ResponseEntity.status(HttpStatus.OK).body(
+			ApiResponse.ok(authService.resetPassword(request.accountId, principal.accountId, principal.role))
+		)
 }

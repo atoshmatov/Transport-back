@@ -5,11 +5,11 @@ import uz.safecity.transportobserver.auth.dto.ResetPasswordResponse
 import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.repository.AccountRepository
+import uz.safecity.transportobserver.auth.security.RoleHierarchyGuard
 import uz.safecity.transportobserver.auth.security.TemporaryPasswordGenerator
 import uz.safecity.transportobserver.auth.service.AuthService
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.ConflictException
-import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.storage.FileStorageService
@@ -93,7 +93,7 @@ class EmployeeService(
 	@Transactional
 	fun create(request: CreateEmployeeRequest, actorAccountId: UUID?, actorRole: RoleType): CreateEmployeeResponse {
 		val role = requireNotNull(request.role) { "role majburiy" }
-		assertCanManageRole(actorRole, role)
+		RoleHierarchyGuard.assertCanManage(actorRole, role)
 
 		val username = request.username?.trim()?.takeIf { it.isNotBlank() } ?: generateUsername(request.fullName)
 		if (accountRepository.existsByUsername(username)) {
@@ -139,17 +139,17 @@ class EmployeeService(
 
 	/**
 	 * fullName/position/department/regionName/phoneNumber/hiredAt only — role and password
-	 * change via dedicated endpoints. Guarded by the same [assertCanManageRole] hierarchy gate
-	 * as [updateStatus]/[resetPassword]: an ADMIN must not be able to edit a SUPER_ADMIN's or
-	 * another ADMIN's core profile fields just because no role/status is being touched here.
-	 * If the employee has no linked [Account] (legacy row — see [Employee] kdoc), there is no
-	 * role to gate on, so the check is skipped and the update proceeds.
+	 * change via dedicated endpoints. Guarded by the same [RoleHierarchyGuard.assertCanManage]
+	 * hierarchy gate as [updateStatus]/[resetPassword]: an ADMIN must not be able to edit a
+	 * SUPER_ADMIN's or another ADMIN's core profile fields just because no role/status is being
+	 * touched here. If the employee has no linked [Account] (legacy row — see [Employee] kdoc),
+	 * there is no role to gate on, so the check is skipped and the update proceeds.
 	 */
 	@Transactional
 	fun update(id: UUID, request: UpdateEmployeeRequest, actorAccountId: UUID?, actorRole: RoleType): EmployeeDto {
 		val employee = findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id).orElse(null)
-		account?.let { assertCanManageRole(actorRole, it.role) }
+		account?.let { RoleHierarchyGuard.assertCanManage(actorRole, it.role) }
 
 		employee.fullName = request.fullName
 		employee.position = request.position
@@ -170,7 +170,7 @@ class EmployeeService(
 		val employee = findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id)
 			.orElseThrow { ResourceNotFoundException("error.employee.account-not-found", id) }
-		assertCanManageRole(actorRole, account.role)
+		RoleHierarchyGuard.assertCanManage(actorRole, account.role)
 
 		account.isActive = isActive
 		accountRepository.save(account)
@@ -189,15 +189,38 @@ class EmployeeService(
 		return EmployeeDto.from(employee, account, getPhotoUrl(employee.photoKey))
 	}
 
-	/** Delegates to [AuthService.resetPassword] so both admin-reset flows (here and /auth/reset-password) share one implementation. */
+	/**
+	 * Delegates to [AuthService.resetPassword] so both admin-reset flows (here and
+	 * `/auth/reset-password`) share one implementation. The hierarchy check is applied twice —
+	 * once here (fail fast, keyed off the Employee) and again inside [AuthService.resetPassword]
+	 * itself (keyed off the Account) — which is intentionally redundant defense-in-depth: the
+	 * inner check is what actually closes the privilege-escalation gap for the *other* entry
+	 * point ([uz.safecity.transportobserver.auth.controller.AuthController.resetPassword]), so it
+	 * must not be skippable, and keeping the outer check here means this method still fails
+	 * before touching [AuthService] at all if it's ever called with a mismatched actor/target.
+	 *
+	 * Deliberately records its OWN audit entry in addition to the "ACCOUNT_PASSWORD_RESET" one
+	 * [AuthService.resetPassword] always writes — this is a considered choice, not an oversight:
+	 * both entries describe the same real-world event but at different, independently useful
+	 * granularity. This one is entityType="Employee"/entityId=<employee id>, matching every other
+	 * audit entry this service writes (EMPLOYEE_CREATED/EMPLOYEE_UPDATED/EMPLOYEE_BLOCKED/...), so
+	 * "show me everything that happened to employee X" queries stay complete without having to
+	 * also resolve Account -> Employee. [AuthService]'s entry is entityType="Account"/entityId=
+	 * <account id>, and is the ONLY entry written when the account has no linked Employee (e.g.
+	 * the bootstrap SUPER_ADMIN) — that path never reaches this method at all. Collapsing to a
+	 * single entry would either lose the Employee-keyed record for this endpoint or leave the
+	 * generic endpoint unaudited for employee-linked accounts; two entries is the simpler,
+	 * lower-risk trade-off given audit consumers here are still early (see [AuditService] kdoc:
+	 * "Skeleton only").
+	 */
 	@Transactional
 	fun resetPassword(id: UUID, actorAccountId: UUID?, actorRole: RoleType): ResetPasswordResponse {
 		findEmployeeOrThrow(id)
 		val account = accountRepository.findByEmployeeId(id)
 			.orElseThrow { ResourceNotFoundException("error.employee.account-not-found", id) }
-		assertCanManageRole(actorRole, account.role)
+		RoleHierarchyGuard.assertCanManage(actorRole, account.role)
 
-		val response = authService.resetPassword(requireNotNull(account.id))
+		val response = authService.resetPassword(requireNotNull(account.id), actorAccountId, actorRole)
 
 		auditService.record(actorAccountId, "EMPLOYEE_PASSWORD_RESET", "Employee", id)
 
@@ -206,28 +229,6 @@ class EmployeeService(
 
 	private fun findEmployeeOrThrow(id: UUID): Employee =
 		employeeRepository.findById(id).orElseThrow { ResourceNotFoundException("error.employee.not-found", id) }
-
-	/**
-	 * Role-hierarchy gate for account provisioning/management (create, block/activate,
-	 * password reset). SUPER_ADMIN may manage any role. ADMIN may only manage
-	 * OPERATOR/INSPECTOR accounts — never SUPER_ADMIN or (any) ADMIN, including
-	 * ADMIN accounts it did not itself create. This is a domain rule, independent
-	 * of the controller-level `@PreAuthorize` gate that merely admits SUPER_ADMIN/ADMIN
-	 * into these endpoints in the first place.
-	 *
-	 * [targetOrRequestedRole] is either the role being assigned to a new account
-	 * (create) or the role already held by the account being acted on
-	 * (updateStatus/resetPassword).
-	 */
-	private fun assertCanManageRole(actorRole: RoleType, targetOrRequestedRole: RoleType) {
-		if (actorRole == RoleType.SUPER_ADMIN) return
-
-		if (actorRole == RoleType.ADMIN &&
-			(targetOrRequestedRole == RoleType.SUPER_ADMIN || targetOrRequestedRole == RoleType.ADMIN)
-		) {
-			throw ForbiddenException("error.employee.role-create-forbidden")
-		}
-	}
 
 	private fun buildSpecification(
 		regionName: String?,
@@ -287,7 +288,7 @@ class EmployeeService(
 	@Transactional
 	fun uploadPhoto(id: UUID, file: MultipartFile, actorAccountId: UUID?, actorRole: RoleType): EmployeeDto {
 		val account = accountRepository.findByEmployeeId(id).orElse(null)
-		account?.let { assertCanManageRole(actorRole, it.role) }
+		account?.let { RoleHierarchyGuard.assertCanManage(actorRole, it.role) }
 		return uploadPhotoInternal(id, file, actorAccountId)
 	}
 

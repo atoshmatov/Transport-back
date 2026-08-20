@@ -1,5 +1,6 @@
 package uz.safecity.transportobserver.auth.service
 
+import uz.safecity.transportobserver.audit.service.AuditService
 import uz.safecity.transportobserver.auth.dto.AccountSummary
 import uz.safecity.transportobserver.auth.dto.ChangePasswordRequest
 import uz.safecity.transportobserver.auth.dto.LoginRequest
@@ -7,9 +8,11 @@ import uz.safecity.transportobserver.auth.dto.LoginResponse
 import uz.safecity.transportobserver.auth.dto.RefreshResponse
 import uz.safecity.transportobserver.auth.dto.ResetPasswordResponse
 import uz.safecity.transportobserver.auth.entity.Account
+import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.RefreshTokenService
 import uz.safecity.transportobserver.auth.security.JwtService
+import uz.safecity.transportobserver.auth.security.RoleHierarchyGuard
 import uz.safecity.transportobserver.auth.security.TemporaryPasswordGenerator
 import uz.safecity.transportobserver.common.exception.AccountDisabledException
 import uz.safecity.transportobserver.common.exception.AccountLockedException
@@ -33,6 +36,7 @@ class AuthService(
 	private val refreshTokenService: RefreshTokenService,
 	private val temporaryPasswordGenerator: TemporaryPasswordGenerator,
 	private val employeeRepository: EmployeeRepository,
+	private val auditService: AuditService,
 	@Value("\${security.lockout.max-attempts}") private val maxAttempts: Int,
 	@Value("\${security.lockout.lock-duration-minutes}") private val lockDurationMinutes: Long
 ) {
@@ -121,11 +125,30 @@ class AuthService(
 		refreshTokenService.revokeAllForAccount(accountId)
 	}
 
-	/** ADMIN/SUPER_ADMIN only — see SecurityConfig authorization rule for /auth/reset-password. */
+	/**
+	 * ADMIN/SUPER_ADMIN only at the controller level (see SecurityConfig authorization rule for
+	 * /auth/reset-password) — but that alone is not sufficient: it only says "some ADMIN or
+	 * SUPER_ADMIN is calling this", not "this caller may act on this particular target account".
+	 * [RoleHierarchyGuard.assertCanManage] enforces the latter, keyed off [actorRole] vs the
+	 * target [Account.role]. Without it, any ADMIN could call this endpoint directly with an
+	 * arbitrary [accountId] — including another ADMIN's or SUPER_ADMIN's — and reset its password,
+	 * bypassing the identical protection already applied on the Employee-scoped reset path
+	 * ([uz.safecity.transportobserver.employees.service.EmployeeService.resetPassword]), which this
+	 * method is also called from.
+	 *
+	 * Always writes its own "ACCOUNT_PASSWORD_RESET" audit entry (entityType="Account") — this is
+	 * the only audit record produced when [accountId] has no linked Employee (e.g. the bootstrap
+	 * SUPER_ADMIN account, see [Account] kdoc), and is written in ADDITION to the
+	 * "EMPLOYEE_PASSWORD_RESET" entry [uz.safecity.transportobserver.employees.service.EmployeeService.resetPassword]
+	 * writes for its own callers — see that method's kdoc for why the resulting double entry there
+	 * is intentional. The temporary password itself is never included in the audit metadata.
+	 */
 	@Transactional
-	fun resetPassword(accountId: UUID): ResetPasswordResponse {
+	fun resetPassword(accountId: UUID, actorAccountId: UUID?, actorRole: RoleType): ResetPasswordResponse {
 		val account = accountRepository.findById(accountId)
 			.orElseThrow { ResourceNotFoundException("error.auth.account-not-found") }
+
+		RoleHierarchyGuard.assertCanManage(actorRole, account.role)
 
 		val temporaryPassword = temporaryPasswordGenerator.generate()
 		account.passwordHash = passwordEncoder.encode(temporaryPassword)
@@ -133,6 +156,13 @@ class AuthService(
 		accountRepository.save(account)
 
 		refreshTokenService.revokeAllForAccount(accountId)
+
+		auditService.record(
+			actorAccountId = actorAccountId,
+			action = "ACCOUNT_PASSWORD_RESET",
+			entityType = "Account",
+			entityId = accountId
+		)
 
 		return ResetPasswordResponse(
 			accountId = requireNotNull(account.id),
