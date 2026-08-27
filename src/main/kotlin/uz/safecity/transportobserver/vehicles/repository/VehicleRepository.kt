@@ -15,4 +15,15 @@ interface VehicleRepository : JpaRepository<Vehicle, UUID>, JpaSpecificationExec
 
 	/** Backs potential `GET /api/v1/map/vehicles` enrichment (MapService) — only active vehicles belong on the map. */
 	fun findByIsActiveTrue(): List<Vehicle>
+
+	/**
+	 * Reverse lookup for the mobile "Xodim kartasi" profile-detail screen's "Xizmat avtomobili"
+	 * line ([uz.safecity.transportobserver.inspector.service.ProfileDetailService]) — the inverse
+	 * direction of [uz.safecity.transportobserver.vehicles.entity.Vehicle.assignedEmployeeId] (see
+	 * that field's kdoc). `First` + `IsActiveTrue` rather than returning every match: an employee
+	 * is expected to have at most one currently-active assigned vehicle for this "my service
+	 * vehicle" display, and a deactivated vehicle (see [Vehicle.isActive] kdoc) is no longer
+	 * meaningfully "assigned" for display purposes even if the FK column is untouched.
+	 */
+	fun findFirstByAssignedEmployeeIdAndIsActiveTrue(assignedEmployeeId: UUID): Vehicle?
 }

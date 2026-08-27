@@ -11,8 +11,11 @@ import uz.safecity.transportobserver.inspector.dto.DashboardSummaryDto
 import uz.safecity.transportobserver.inspector.dto.IncidentTypeCountDto
 import uz.safecity.transportobserver.inspector.dto.InspectorCurrentLocationDto
 import uz.safecity.transportobserver.inspector.dto.InspectorStatsDto
+import uz.safecity.transportobserver.inspector.dto.ProfileDetailDto
 import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
+import uz.safecity.transportobserver.inspector.dto.VehicleDetailDto
 import uz.safecity.transportobserver.inspector.service.InspectorPanelService
+import uz.safecity.transportobserver.inspector.service.ProfileDetailService
 import uz.safecity.transportobserver.map.dto.UpdateInspectorLocationRequest
 import uz.safecity.transportobserver.map.service.InspectorLocationService
 import uz.safecity.transportobserver.shifts.dto.StartShiftRequest
@@ -46,7 +49,9 @@ import java.util.UUID
  * kdoc for how "on duty" (explicit shift check-in) differs from the `online` presence signal.
  * `/vehicles` is backed by [VehicleService] (`vehicles` module) instead — see
  * [listVehiclesForPicker] kdoc for why this is a separate, narrower endpoint from
- * [uz.safecity.transportobserver.vehicles.controller.VehicleController.list].
+ * [uz.safecity.transportobserver.vehicles.controller.VehicleController.list]. `/vehicles/{id}` is
+ * NOT scoped to the caller's own assigned incidents (unlike every other endpoint here) — see
+ * [getVehicleDetail] kdoc for why a vehicle's own violation history is not "my" data.
  */
 @RestController
 @RequestMapping("/api/v1/inspector")
@@ -55,7 +60,8 @@ class InspectorPanelController(
 	private val inspectorLocationService: InspectorLocationService,
 	private val workShiftService: WorkShiftService,
 	private val incidentService: IncidentService,
-	private val vehicleService: VehicleService
+	private val vehicleService: VehicleService,
+	private val profileDetailService: ProfileDetailService
 ) {
 
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
@@ -207,4 +213,46 @@ class InspectorPanelController(
 		@PageableDefault(size = 30) pageable: Pageable
 	): ResponseEntity<ApiResponse<PageResponse<VehiclePickerDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(vehicleService.listForInspectorPicker(query, pageable)))
+
+	/**
+	 * Mobile "Transport vositasi" (vehicleDetail) screen — opened from the vehicle line on the
+	 * "Hodisa kartasi" (incidentDetail) screen, or from a recent-incident row on Home. See
+	 * [uz.safecity.transportobserver.inspector.dto.VehicleDetailDto] kdoc for exactly what this
+	 * deliberately does NOT surface (VIN/owner-org/STIR/route-permit/inspection-date master data —
+	 * admin-panel-only fields not yet on [uz.safecity.transportobserver.vehicles.entity.Vehicle];
+	 * adding them is out of scope here, since it would require a new web-frontend form).
+	 *
+	 * INSPECTOR-only, same as every other endpoint on this controller — NOT admin-role-gated like
+	 * [uz.safecity.transportobserver.vehicles.controller.VehicleController.getById]. This is a
+	 * separate, narrower, INSPECTOR-facing detail view rather than a role carve-out on that admin
+	 * endpoint, same split rationale as [listVehiclesForPicker] above (see that method's kdoc).
+	 * `404` when [id] doesn't resolve to any [uz.safecity.transportobserver.vehicles.entity.Vehicle] —
+	 * see [InspectorPanelService.getVehicleDetail] kdoc.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@GetMapping("/vehicles/{id}")
+	fun getVehicleDetail(
+		@PathVariable id: UUID,
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<VehicleDetailDto>> =
+		ResponseEntity.ok(ApiResponse.ok(inspectorPanelService.getVehicleDetail(principal, id)))
+
+	/**
+	 * Mobile "Xodim kartasi" (`profileDetail`) screen — the inspector's OWN full profile card,
+	 * opened from the Profile tab (`backTo: 'profile'`). Backed by [ProfileDetailService] (a
+	 * separate service, not [InspectorPanelService]) — see that class's kdoc for exactly which
+	 * design fields (JSHSHIR, birth date, home address, email, service certificate, driving
+	 * category, attestation dates, assigned tablet/camera) this deliberately leaves out and why:
+	 * none of that HR-master data exists anywhere in this codebase yet, and adding it would require
+	 * a new web-frontend admin form, which is out of scope here.
+	 *
+	 * Same INSPECTOR-only, `principal.accountId`-scoped pattern as every other `/me/...` endpoint on
+	 * this controller — there is no path here to view another inspector's profile.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@GetMapping("/me/profile-detail")
+	fun getMyProfileDetail(
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<ProfileDetailDto>> =
+		ResponseEntity.ok(ApiResponse.ok(profileDetailService.getMyProfileDetail(principal)))
 }

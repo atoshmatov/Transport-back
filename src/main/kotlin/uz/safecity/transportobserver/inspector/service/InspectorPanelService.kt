@@ -18,9 +18,13 @@ import uz.safecity.transportobserver.inspector.dto.InspectorCurrentLocationDto
 import uz.safecity.transportobserver.inspector.dto.InspectorStatsDto
 import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
 import uz.safecity.transportobserver.inspector.dto.RecentInspectionDto
+import uz.safecity.transportobserver.inspector.dto.VehicleDetailDto
+import uz.safecity.transportobserver.inspector.dto.VehicleViolationDto
+import uz.safecity.transportobserver.vehicles.service.VehicleService
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * Backs the Inspector web-panel dashboard + map screens
@@ -63,7 +67,8 @@ import java.time.ZoneId
 class InspectorPanelService(
 	private val incidentRepository: IncidentRepository,
 	private val inspectionRepository: InspectionRepository,
-	private val checkpointRepository: CheckpointRepository
+	private val checkpointRepository: CheckpointRepository,
+	private val vehicleService: VehicleService
 ) {
 
 	fun getDashboardSummary(principal: CustomUserDetails): DashboardSummaryDto {
@@ -171,6 +176,26 @@ class InspectorPanelService(
 
 		return incidentRepository.findTop10ByAssignedInspectorIdOrderByCreatedAtDesc(principal.accountId)
 			.map { RecentActivityDto.from(it) }
+	}
+
+	/**
+	 * `GET /api/v1/inspector/vehicles/{id}` — see [VehicleDetailDto] kdoc for exactly what this
+	 * does and does not surface. [VehicleService.getById] throws
+	 * [uz.safecity.transportobserver.common.exception.ResourceNotFoundException] (404) the same way
+	 * every other vehicle lookup in this codebase does, so an unknown [id] behaves identically for
+	 * this INSPECTOR-facing endpoint and the admin-only [uz.safecity.transportobserver.vehicles.controller.VehicleController.getById].
+	 * Deliberately NOT scoped to "my" vehicles/incidents (unlike this service's other methods) — see
+	 * [IncidentRepository.findTop20ByVehicleIdOrderByCreatedAtDesc] kdoc: a vehicle's violation
+	 * history spans whichever inspector(s) filed reports against it, not just the caller.
+	 */
+	fun getVehicleDetail(principal: CustomUserDetails, id: UUID): VehicleDetailDto {
+		assertInspector(principal.role)
+
+		val vehicle = vehicleService.getById(id)
+		val violationHistory = incidentRepository.findTop20ByVehicleIdOrderByCreatedAtDesc(id)
+			.map { VehicleViolationDto.from(it) }
+
+		return VehicleDetailDto.from(vehicle, violationHistory)
 	}
 
 	private fun assignedIncidents(principal: CustomUserDetails): List<Incident> {

@@ -84,4 +84,13 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 	 * assignment.
 	 */
 	fun findByCheckpointIdAndEndedAtIsNull(checkpointId: UUID): List<WorkShift>
+
+	/**
+	 * Mobile "Xodim kartasi" profile-detail screen's "SO'NGGI FAOLIYAT" timeline
+	 * ([uz.safecity.transportobserver.inspector.service.ProfileDetailService]) — the caller's most
+	 * recently STARTED shifts (any/all, open or closed), so a shift check-in ("Navbatchilikni
+	 * boshladi") shows up in the merged activity feed alongside their own Incident/Inspection
+	 * events.
+	 */
+	fun findTop5ByInspectorIdOrderByStartedAtDesc(inspectorId: UUID): List<WorkShift>
 }

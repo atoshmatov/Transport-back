@@ -6,6 +6,9 @@ import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
 import uz.safecity.transportobserver.incidents.entity.IncidentType
 import uz.safecity.transportobserver.inspections.entity.Inspection
+import uz.safecity.transportobserver.vehicles.dto.VehicleDto
+import uz.safecity.transportobserver.vehicles.entity.VehicleOwnerType
+import uz.safecity.transportobserver.vehicles.entity.VehicleType
 import java.time.Instant
 import java.util.UUID
 
@@ -149,6 +152,79 @@ data class RecentActivityDto(
 			status = incident.status,
 			occurredAt = incident.occurredAt,
 			createdAt = requireNotNull(incident.createdAt)
+		)
+	}
+}
+
+/**
+ * `GET /api/v1/inspector/vehicles/{id}` — mobile "Transport vositasi" (vehicleDetail) screen
+ * (`TO-Screen.dc.html`, ~L918-945), opened from the vehicle line on the mobile "Hodisa kartasi"
+ * (incidentDetail) screen or from a recent-incident row on the Home screen.
+ *
+ * Deliberately NOT every field the design mockup shows: VIN, owner organization/STIR, route
+ * permit, technical-inspection dates etc. are all admin-entered master data that does not exist
+ * on [uz.safecity.transportobserver.vehicles.entity.Vehicle] yet, and surfacing them would require
+ * a new admin-panel (web frontend) form to capture them — out of scope for this backend-only task.
+ * This DTO surfaces only what is real today: the vehicle's existing registry fields (same subset
+ * [VehicleDto] already exposes) plus [violationHistory], which is now genuinely computable because
+ * [uz.safecity.transportobserver.incidents.entity.Incident.vehicleId] exists (see that field's kdoc)
+ * — unlike the still-missing master-data fields above, this is not a placeholder.
+ */
+data class VehicleDetailDto(
+	val id: UUID,
+	val plateNumber: String,
+	val model: String?,
+	val type: VehicleType,
+	val regionName: String?,
+	val ownerType: VehicleOwnerType?,
+	val violationHistory: List<VehicleViolationDto>
+) {
+	companion object {
+		fun from(vehicle: VehicleDto, violationHistory: List<VehicleViolationDto>) = VehicleDetailDto(
+			id = vehicle.id,
+			plateNumber = vehicle.plateNumber,
+			model = vehicle.model,
+			type = vehicle.type,
+			regionName = vehicle.regionName,
+			ownerType = vehicle.ownerType,
+			violationHistory = violationHistory
+		)
+	}
+}
+
+/**
+ * One row of [VehicleDetailDto.violationHistory] — an [Incident] this vehicle was involved in via
+ * [Incident.vehicleId], regardless of which inspector filed it or is currently assigned to it:
+ * this is the *vehicle's* own record, not "my" incidents (contrast [RecentActivityDto], which IS
+ * scoped to the calling inspector).
+ *
+ * [description] is truncated to [DESCRIPTION_MAX_LENGTH] — this is a summary row on a history
+ * list, not the full "Hodisa kartasi" detail view (`GET /incidents/{id}` already exists for that,
+ * via [incidentId]), so a very long free-text description shouldn't bloat this list response.
+ *
+ * [occurredAt] falls back to [Incident.createdAt] when [Incident.occurredAt] is null — same
+ * "occurredAt is caller-reported and can be absent, createdAt always exists" reasoning as
+ * [IncidentRepository.countDailyCreatedBetween]'s kdoc. In practice every [Incident] created
+ * through [uz.safecity.transportobserver.incidents.service.IncidentService] already has
+ * `occurredAt` set (defaults to server time when the client omits it), so this fallback only
+ * matters for the theoretical case of a row inserted outside that service.
+ */
+data class VehicleViolationDto(
+	val incidentId: UUID,
+	val type: IncidentType,
+	val description: String?,
+	val occurredAt: Instant,
+	val status: IncidentStatus
+) {
+	companion object {
+		private const val DESCRIPTION_MAX_LENGTH = 200
+
+		fun from(incident: Incident) = VehicleViolationDto(
+			incidentId = requireNotNull(incident.id),
+			type = incident.type,
+			description = incident.description?.take(DESCRIPTION_MAX_LENGTH),
+			occurredAt = incident.occurredAt ?: requireNotNull(incident.createdAt),
+			status = incident.status
 		)
 	}
 }

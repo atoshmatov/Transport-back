@@ -45,6 +45,19 @@ interface InspectionRepository : JpaRepository<Inspection, UUID>, JpaSpecificati
 	/** Inspector panel "recent inspections" widget — the caller's most recently touched tasks, any status. */
 	fun findTop5ByAssignedInspectorIdOrderByUpdatedAtDesc(assignedInspectorId: UUID): List<Inspection>
 
+	/**
+	 * Mobile "Xodim kartasi" profile-detail screen's "SO'NGGI FAOLIYAT" timeline
+	 * ([uz.safecity.transportobserver.inspector.service.ProfileDetailService]) — the caller's most
+	 * recently COMPLETED inspections, ordered by [Inspection.performedAt] (always non-null once
+	 * COMPLETED, see [Inspection] class kdoc), not [BaseEntity.updatedAt] like
+	 * [findTop5ByAssignedInspectorIdOrderByUpdatedAtDesc] — this timeline answers "when did the
+	 * inspector actually finish this", not "when was this row last touched".
+	 */
+	fun findTop5ByAssignedInspectorIdAndStatusOrderByPerformedAtDesc(
+		assignedInspectorId: UUID,
+		status: InspectionStatus
+	): List<Inspection>
+
 	/** Reports dashboard `todayInspectionsCount` (ReportService) — system-wide, not scoped to one inspector. */
 	fun countByStatusAndPerformedAtBetween(status: InspectionStatus, start: Instant, end: Instant): Long
 

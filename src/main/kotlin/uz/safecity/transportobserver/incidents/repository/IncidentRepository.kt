@@ -97,6 +97,19 @@ interface IncidentRepository : JpaRepository<Incident, UUID>, JpaSpecificationEx
 
 	/** Mobile Profile screen "so'nggi ishlar" widget — the caller's most recently created incident reports. */
 	fun findTop10ByAssignedInspectorIdOrderByCreatedAtDesc(assignedInspectorId: UUID): List<Incident>
+
+	/**
+	 * Mobile "Transport vositasi" (vehicleDetail) screen's violation history —
+	 * `GET /api/v1/inspector/vehicles/{id}` (InspectorPanelService#getVehicleDetail). Deliberately
+	 * NOT scoped to any one inspector (contrast [findTop10ByAssignedInspectorIdOrderByCreatedAtDesc]) —
+	 * this is the *vehicle's* record across whichever inspector(s) filed a report against it via
+	 * [Incident.vehicleId]. Ordered by `createdAt`, not `occurredAt`, for the same reliability
+	 * reason as [countDailyCreatedBetween]'s kdoc: `occurredAt` is caller-reported and can be
+	 * null/backdated, whereas `createdAt` is always set. `Top20` (not paginated) mirrors
+	 * [findTop10ByAssignedInspectorIdOrderByCreatedAtDesc] — a simple recent-history list is enough
+	 * for this screen, same as that one.
+	 */
+	fun findTop20ByVehicleIdOrderByCreatedAtDesc(vehicleId: UUID): List<Incident>
 }
 
 /** See [IncidentRepository.countGroupByTypeForInspector]. */
