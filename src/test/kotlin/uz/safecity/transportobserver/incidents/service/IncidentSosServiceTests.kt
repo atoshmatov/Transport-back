@@ -85,7 +85,7 @@ class IncidentSosServiceTests {
 		val inspector = createInspector()
 
 		val dto = incidentService.createSos(
-			CreateSosRequest(latitude = 41.3, longitude = 69.2),
+			CreateSosRequest(latitude = 41.3, longitude = 69.2, type = IncidentType.SECURITY),
 			CustomUserDetails.from(inspector)
 		)
 
@@ -106,6 +106,41 @@ class IncidentSosServiceTests {
 		assertTrue(dto.isSos)
 		assertEquals(null, dto.latitude)
 		assertEquals(null, dto.longitude)
+	}
+
+	@Test
+	fun `createSos defaults to OTHER when the mobile SOS 'Holat turi' picker is omitted`() {
+		val inspector = createInspector()
+
+		val dto = incidentService.createSos(CreateSosRequest(), CustomUserDetails.from(inspector))
+
+		assertEquals(IncidentType.OTHER, dto.type)
+	}
+
+	@Test
+	fun `createSos persists the mobile SOS 'Holat turi' selection for FIRE`() {
+		val inspector = createInspector()
+
+		val dto = incidentService.createSos(
+			CreateSosRequest(type = IncidentType.FIRE),
+			CustomUserDetails.from(inspector)
+		)
+
+		assertEquals(IncidentType.FIRE, dto.type)
+		val persisted = incidentRepository.findById(dto.id).orElseThrow()
+		assertEquals(IncidentType.FIRE, persisted.type)
+	}
+
+	@Test
+	fun `createSos persists the mobile SOS 'Holat turi' selection for MEDICAL`() {
+		val inspector = createInspector()
+
+		val dto = incidentService.createSos(
+			CreateSosRequest(type = IncidentType.MEDICAL),
+			CustomUserDetails.from(inspector)
+		)
+
+		assertEquals(IncidentType.MEDICAL, dto.type)
 	}
 
 	@Test
@@ -191,5 +226,33 @@ class IncidentSosServiceTests {
 		assertThrows(ResourceNotFoundException::class.java) {
 			incidentService.cancelSos(created.id, CustomUserDetails.from(other))
 		}
+	}
+
+	@Test
+	fun `createSos with the same clientUuid twice only creates one Incident`() {
+		val inspector = createInspector()
+		val clientUuid = UUID.randomUUID()
+
+		val first = incidentService.createSos(
+			CreateSosRequest(type = IncidentType.FIRE, clientUuid = clientUuid),
+			CustomUserDetails.from(inspector)
+		)
+		val second = incidentService.createSos(
+			CreateSosRequest(type = IncidentType.FIRE, clientUuid = clientUuid),
+			CustomUserDetails.from(inspector)
+		)
+
+		assertEquals(first.id, second.id)
+		assertEquals(1, incidentRepository.findAll().count { it.clientUuid == clientUuid })
+	}
+
+	@Test
+	fun `createSos without a clientUuid never dedups`() {
+		val inspector = createInspector()
+
+		val first = incidentService.createSos(CreateSosRequest(), CustomUserDetails.from(inspector))
+		val second = incidentService.createSos(CreateSosRequest(), CustomUserDetails.from(inspector))
+
+		assertTrue(first.id != second.id)
 	}
 }

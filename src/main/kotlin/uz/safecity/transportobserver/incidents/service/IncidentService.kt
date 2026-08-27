@@ -208,13 +208,29 @@ class IncidentService(
 
 	/**
 	 * `POST /api/v1/inspector/me/sos` — the inspector panic button (INSPECTOR-only, see
-	 * [assertInspectorForSos]). Creates an [Incident] with [IncidentType.SECURITY] +
-	 * [ActionType.DANGER_REPORTED] + [IncidentStatus.NEW] — deliberately reusing the existing
-	 * status enum rather than adding a dedicated `PENDING_ACK` value (per task scope: "ortiqcha
-	 * murakkablashtirmaslik" — the operator workflow of NEW -> IN_PROGRESS already means "somebody
-	 * needs to act on this", which is exactly what an unacknowledged SOS needs). [Incident.isSos]
-	 * is the one flag that marks this row as a panic-button report rather than an ordinary SECURITY
-	 * incident — see that field's kdoc.
+	 * [assertInspectorForSos]). Creates an [Incident] with [CreateSosRequest.type] (the mobile SOS
+	 * screen's "Holat turi" picker — defaults to [IncidentType.OTHER] for an older client that
+	 * doesn't send it yet, see that field's kdoc) + [ActionType.DANGER_REPORTED] +
+	 * [IncidentStatus.NEW] — deliberately reusing the existing status enum rather than adding a
+	 * dedicated `PENDING_ACK` value (per task scope: "ortiqcha murakkablashtirmaslik" — the
+	 * operator workflow of NEW -> IN_PROGRESS already means "somebody needs to act on this", which
+	 * is exactly what an unacknowledged SOS needs). [Incident.isSos] is the one flag that marks
+	 * this row as a panic-button report rather than an ordinary report of the same [IncidentType]
+	 * — see that field's kdoc.
+	 *
+	 * Dedup: same [CreateSosRequest.clientUuid] mechanism and same ownership-gated
+	 * [isOwnedByOrVisibleTo] check as [create]'s dedup (see that method's kdoc for the full
+	 * security reasoning) — if a match is found and visible to this caller, the existing row is
+	 * returned as-is instead of inserting a duplicate. This is what makes the mobile SOS screen's
+	 * network-error retry (1s/2s/4s backoff) safe: a request that succeeded server-side but whose
+	 * response was lost to the same timeout no longer creates a second Incident on retry. Optional
+	 * — an older mobile build that predates this field sends no `clientUuid` at all, so no dedup is
+	 * attempted and every call creates a new Incident, exactly as before this field existed (an SOS
+	 * request must never be rejected for a missing field — same reasoning as [CreateSosRequest.type]).
+	 * A `clientUuid` clash between an ordinary [CreateIncidentRequest] and an SOS is not a concern
+	 * in practice: both are random UUIDs generated independently on the client, and the column's
+	 * `unique` constraint (see [Incident.clientUuid] kdoc) already guarantees the two can never
+	 * collide in storage regardless.
 	 *
 	 * Auto-assigns to the caller (same reasoning as [create]'s INSPECTOR branch: they ARE the
 	 * emergency, so there's no dispatch step to wait on) and:
@@ -236,14 +252,25 @@ class IncidentService(
 	fun createSos(request: CreateSosRequest, principal: CustomUserDetails): IncidentDto {
 		assertInspectorForSos(principal.role)
 
+		request.clientUuid?.let { clientUuid ->
+			incidentRepository.findByClientUuid(clientUuid)?.let { existing ->
+				if (isOwnedByOrVisibleTo(existing, principal)) {
+					return toDto(existing)
+				}
+				// Belongs to someone else and caller has no elevated visibility: treat as if no
+				// dedup match existed at all (see kdoc above) — fall through to normal creation.
+			}
+		}
+
 		val incident = Incident(
 			title = "SOS / Favqulodda signal",
-			type = IncidentType.SECURITY,
+			type = request.type,
 			actionType = ActionType.DANGER_REPORTED,
 			location = GeoUtils.toPointOrNull(request.latitude, request.longitude),
 			reportedBy = principal.accountId,
 			occurredAt = Instant.now(),
 			assignedInspectorId = principal.accountId,
+			clientUuid = request.clientUuid,
 			isSos = true
 		)
 		val saved = incidentRepository.save(incident)
@@ -267,6 +294,7 @@ class IncidentService(
 					inspectorName = inspectorName,
 					latitude = saved.location?.y,
 					longitude = saved.location?.x,
+					incidentType = saved.type,
 					createdAt = saved.createdAt ?: Instant.now()
 				)
 			)

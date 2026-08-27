@@ -11,7 +11,7 @@ import java.time.Instant
 import java.util.UUID
 
 enum class IncidentStatus { NEW, IN_PROGRESS, RESOLVED, REJECTED }
-enum class IncidentType { ACCIDENT, VIOLATION, TECHNICAL_FAULT, SECURITY, OTHER }
+enum class IncidentType { ACCIDENT, VIOLATION, TECHNICAL_FAULT, SECURITY, FIRE, MEDICAL, OTHER }
 
 /**
  * What the inspector actually DID when filing this [Incident] — orthogonal to [IncidentType]
@@ -105,11 +105,13 @@ class Incident(
 	/**
 	 * Marks this row as having been created through the inspector's SOS / favqulodda signal
 	 * (`POST /api/v1/inspector/me/sos`) rather than a normal incident report — orthogonal to
-	 * [type]/[status]: an SOS incident still uses the existing [IncidentType.SECURITY] +
-	 * [ActionType.DANGER_REPORTED] + [IncidentStatus.NEW] values (see
+	 * [status]: an SOS incident carries whatever [type] the mobile "Holat turi" picker sent
+	 * (defaults to [IncidentType.OTHER] when omitted by an older client — see
+	 * [uz.safecity.transportobserver.incidents.dto.CreateSosRequest] kdoc) plus a fixed
+	 * [ActionType.DANGER_REPORTED] + [IncidentStatus.NEW] (see
 	 * [uz.safecity.transportobserver.incidents.service.IncidentService.createSos] kdoc for why a
 	 * brand-new status was deliberately NOT added), so this flag is the only server-side signal
-	 * that distinguishes "inspector pressed the panic button" from an ordinary SECURITY report.
+	 * that distinguishes "inspector pressed the panic button" from an ordinary report of the same [type].
 	 * Also gates [uz.safecity.transportobserver.incidents.service.IncidentService.cancelSos]: only
 	 * an `isSos=true` row within its 5-second cancel window may be cancelled that way.
 	 */
