@@ -2,6 +2,9 @@ package uz.safecity.transportobserver.inspector.controller
 
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
+import uz.safecity.transportobserver.incidents.dto.CreateSosRequest
+import uz.safecity.transportobserver.incidents.dto.IncidentDto
+import uz.safecity.transportobserver.incidents.service.IncidentService
 import uz.safecity.transportobserver.inspector.dto.ActionTypeCountDto
 import uz.safecity.transportobserver.inspector.dto.DashboardSummaryDto
 import uz.safecity.transportobserver.inspector.dto.IncidentTypeCountDto
@@ -19,10 +22,12 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 /**
  * Inspector web-panel dashboard + map screens. Every endpoint here is
@@ -38,7 +43,8 @@ import org.springframework.web.bind.annotation.RestController
 class InspectorPanelController(
 	private val inspectorPanelService: InspectorPanelService,
 	private val inspectorLocationService: InspectorLocationService,
-	private val workShiftService: WorkShiftService
+	private val workShiftService: WorkShiftService,
+	private val incidentService: IncidentService
 ) {
 
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
@@ -128,4 +134,32 @@ class InspectorPanelController(
 		val current = workShiftService.getCurrent(principal) ?: return ResponseEntity.noContent().build()
 		return ResponseEntity.ok(ApiResponse.ok(current))
 	}
+
+	/**
+	 * Panic button. `latitude`/`longitude` are optional (best-effort, may be absent — see
+	 * [CreateSosRequest] kdoc). See [IncidentService.createSos] for the full effect: creates an
+	 * [uz.safecity.transportobserver.incidents.entity.Incident] with `isSos=true`, notifies every
+	 * active SUPER_ADMIN/ADMIN/OPERATOR, and broadcasts over STOMP to `/topic/sos` in real time.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@PostMapping("/me/sos")
+	fun createSos(
+		@AuthenticationPrincipal principal: CustomUserDetails,
+		@RequestBody(required = false) request: CreateSosRequest?
+	): ResponseEntity<ApiResponse<IncidentDto>> =
+		ResponseEntity.status(HttpStatus.CREATED).body(
+			ApiResponse.ok(incidentService.createSos(request ?: CreateSosRequest(), principal))
+		)
+
+	/**
+	 * Take-back window for a misclick — see [IncidentService.cancelSos] for why this is only
+	 * honored within 5 seconds of the SOS being created, and only on the caller's own SOS.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@PostMapping("/me/sos/{id}/cancel")
+	fun cancelSos(
+		@PathVariable id: UUID,
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<IncidentDto>> =
+		ResponseEntity.ok(ApiResponse.ok(incidentService.cancelSos(id, principal)))
 }

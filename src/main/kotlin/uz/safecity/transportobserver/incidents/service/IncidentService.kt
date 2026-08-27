@@ -7,23 +7,31 @@ import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.BadRequestException
+import uz.safecity.transportobserver.common.exception.ConflictException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.util.GeoUtils
 import uz.safecity.transportobserver.common.util.StatusTransitionValidator
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
+import uz.safecity.transportobserver.incidents.dto.CreateSosRequest
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
+import uz.safecity.transportobserver.incidents.dto.SosBroadcastDto
+import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
 import uz.safecity.transportobserver.incidents.entity.IncidentType
+import uz.safecity.transportobserver.incidents.event.SosCreatedEvent
 import uz.safecity.transportobserver.incidents.repository.EvidenceRepository
 import uz.safecity.transportobserver.incidents.repository.IncidentRepository
+import uz.safecity.transportobserver.notifications.service.NotificationService
 import jakarta.persistence.criteria.Predicate
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -46,7 +54,9 @@ class IncidentService(
 	private val evidenceRepository: EvidenceRepository,
 	private val accountRepository: AccountRepository,
 	private val employeeRepository: EmployeeRepository,
-	private val auditService: AuditService
+	private val auditService: AuditService,
+	private val notificationService: NotificationService,
+	private val applicationEventPublisher: ApplicationEventPublisher
 ) {
 
 	/**
@@ -181,12 +191,138 @@ class IncidentService(
 			metadata = "type=${saved.type}"
 		)
 
+		// Notify the assigned inspector — but only when someone ELSE assigned them (assign-on-create
+		// by a SUPER_ADMIN/ADMIN/OPERATOR). An INSPECTOR caller always auto-assigns to themselves
+		// (see kdoc above), and notifying someone that they assigned themselves is pointless noise.
+		assignOnCreateInspectorId?.let {
+			notificationService.notifyAssignment(it, requireNotNull(saved.id), saved.title)
+		}
+
 		// Freshly created — never has evidence yet, no need for a query.
 		return IncidentDto.from(
 			saved,
 			evidenceCount = 0,
 			assignedInspectorName = saved.assignedInspectorId?.let { resolveInspectorNames(listOf(it))[it] }
 		)
+	}
+
+	/**
+	 * `POST /api/v1/inspector/me/sos` — the inspector panic button (INSPECTOR-only, see
+	 * [assertInspectorForSos]). Creates an [Incident] with [IncidentType.SECURITY] +
+	 * [ActionType.DANGER_REPORTED] + [IncidentStatus.NEW] — deliberately reusing the existing
+	 * status enum rather than adding a dedicated `PENDING_ACK` value (per task scope: "ortiqcha
+	 * murakkablashtirmaslik" — the operator workflow of NEW -> IN_PROGRESS already means "somebody
+	 * needs to act on this", which is exactly what an unacknowledged SOS needs). [Incident.isSos]
+	 * is the one flag that marks this row as a panic-button report rather than an ordinary SECURITY
+	 * incident — see that field's kdoc.
+	 *
+	 * Auto-assigns to the caller (same reasoning as [create]'s INSPECTOR branch: they ARE the
+	 * emergency, so there's no dispatch step to wait on) and:
+	 *  - persists an audit trail entry (`INCIDENT_SOS_CREATED`)
+	 *  - creates a [uz.safecity.transportobserver.notifications.entity.NotificationType.SOS]
+	 *    row for every active SUPER_ADMIN/ADMIN/OPERATOR account (see
+	 *    [NotificationService.notifySosToAdmins])
+	 *  - publishes a [SosCreatedEvent] wrapping a [SosBroadcastDto], which
+	 *    [uz.safecity.transportobserver.incidents.listener.SosBroadcastListener] pushes over STOMP to
+	 *    `/topic/sos` AFTER this transaction commits, so an admin/operator dashboard already
+	 *    connected gets it in real time without waiting for a `GET /notifications` poll — this IS
+	 *    the point of an SOS (speed). The push is deliberately AFTER_COMMIT rather than a direct
+	 *    `simpMessagingTemplate.convertAndSend(...)` call right here: doing it inline, before this
+	 *    `@Transactional` method's commit, could push a live SOS alert to the dashboard for an
+	 *    incident that a later rollback then makes not exist in the DB at all — see that listener's
+	 *    kdoc for the full reasoning.
+	 */
+	@Transactional
+	fun createSos(request: CreateSosRequest, principal: CustomUserDetails): IncidentDto {
+		assertInspectorForSos(principal.role)
+
+		val incident = Incident(
+			title = "SOS / Favqulodda signal",
+			type = IncidentType.SECURITY,
+			actionType = ActionType.DANGER_REPORTED,
+			location = GeoUtils.toPointOrNull(request.latitude, request.longitude),
+			reportedBy = principal.accountId,
+			occurredAt = Instant.now(),
+			assignedInspectorId = principal.accountId,
+			isSos = true
+		)
+		val saved = incidentRepository.save(incident)
+
+		auditService.record(
+			actorAccountId = principal.accountId,
+			action = "INCIDENT_SOS_CREATED",
+			entityType = "Incident",
+			entityId = saved.id,
+			metadata = "type=${saved.type}"
+		)
+
+		val inspectorName = resolveInspectorNames(listOf(principal.accountId))[principal.accountId]
+		notificationService.notifySosToAdmins(inspectorName, requireNotNull(saved.id))
+
+		applicationEventPublisher.publishEvent(
+			SosCreatedEvent(
+				SosBroadcastDto(
+					incidentId = requireNotNull(saved.id),
+					inspectorAccountId = principal.accountId,
+					inspectorName = inspectorName,
+					latitude = saved.location?.y,
+					longitude = saved.location?.x,
+					createdAt = saved.createdAt ?: Instant.now()
+				)
+			)
+		)
+
+		return IncidentDto.from(saved, evidenceCount = 0, assignedInspectorName = inspectorName)
+	}
+
+	/**
+	 * `POST /api/v1/inspector/me/sos/{id}/cancel` — lets the inspector who just pressed the panic
+	 * button take it back within [SOS_CANCEL_WINDOW] (misclick / false alarm caught immediately).
+	 * Scoped to the caller's own SOS the same ownership-first way as [getById]/[updateStatus] (404,
+	 * not 403, on a foreign/non-existent id — see those kdocs).
+	 *
+	 * Deliberately bypasses [STATUS_TRANSITIONS]/[assertValidTransition] entirely rather than
+	 * routing through [updateStatus]: NEW -> REJECTED is not a normally allowed transition (see
+	 * that map's kdoc — REJECTED is only reachable from IN_PROGRESS), but "I take back my own SOS
+	 * within 5 seconds" is a narrower, differently-authorized action than the general operator
+	 * status-change workflow, not a graph edge that should be opened up for every NEW incident.
+	 */
+	@Transactional
+	fun cancelSos(id: UUID, principal: CustomUserDetails): IncidentDto {
+		assertInspectorForSos(principal.role)
+
+		val incident = incidentRepository.findByIdAndAssignedInspectorId(id, principal.accountId)
+			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
+
+		if (!incident.isSos) {
+			throw BadRequestException("error.incident.sos-cancel-not-sos")
+		}
+		if (incident.status != IncidentStatus.NEW) {
+			throw ConflictException("error.incident.sos-cancel-already-processed")
+		}
+		val createdAt = incident.createdAt ?: throw ConflictException("error.incident.sos-cancel-window-expired")
+		if (Duration.between(createdAt, Instant.now()) > SOS_CANCEL_WINDOW) {
+			throw ConflictException("error.incident.sos-cancel-window-expired")
+		}
+
+		incident.status = IncidentStatus.REJECTED
+		val saved = incidentRepository.save(incident)
+
+		auditService.record(
+			actorAccountId = principal.accountId,
+			action = "INCIDENT_SOS_CANCELLED",
+			entityType = "Incident",
+			entityId = id
+		)
+
+		return toDto(saved)
+	}
+
+	/** Defense-in-depth mirror of the controller's @PreAuthorize on the `/me/sos...` endpoints. */
+	private fun assertInspectorForSos(role: RoleType) {
+		if (role != RoleType.INSPECTOR) {
+			throw ForbiddenException("error.incident.sos-forbidden")
+		}
 	}
 
 	/**
@@ -219,6 +355,8 @@ class IncidentService(
 			entityId = id,
 			metadata = "inspectorAccountId=$inspectorAccountId"
 		)
+
+		notificationService.notifyAssignment(inspectorAccountId, id, saved.title)
 
 		return toDto(saved)
 	}
@@ -412,5 +550,8 @@ class IncidentService(
 			IncidentStatus.RESOLVED to setOf(IncidentStatus.IN_PROGRESS),
 			IncidentStatus.REJECTED to setOf(IncidentStatus.IN_PROGRESS)
 		)
+
+		/** [cancelSos] window — see that method's kdoc. */
+		private val SOS_CANCEL_WINDOW: Duration = Duration.ofSeconds(5)
 	}
 }

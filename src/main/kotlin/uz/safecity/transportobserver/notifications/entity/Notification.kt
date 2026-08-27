@@ -8,7 +8,14 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Table
 import java.util.UUID
 
-enum class NotificationType { INCIDENT, RAILSAFE_ALERT, SYSTEM, ACCOUNT }
+/**
+ * [SOS] is its own value (not folded into [INCIDENT]) so the web admin panel / mobile client can
+ * style and prioritize an inspector's panic-button push differently from an ordinary incident
+ * notification (e.g. sound/badge) purely by switching on [type] — see
+ * [uz.safecity.transportobserver.incidents.service.IncidentService.createSos] kdoc for the
+ * SOS flow this backs.
+ */
+enum class NotificationType { INCIDENT, SOS, RAILSAFE_ALERT, SYSTEM, ACCOUNT }
 
 /**
  * Placeholder — delivered to clients over STOMP (/user/queue/notifications,

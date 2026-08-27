@@ -100,6 +100,20 @@ class Incident(
 	 * applies to non-null values (standard SQL unique-index semantics).
 	 */
 	@Column(name = "client_uuid", unique = true)
-	var clientUuid: UUID? = null
+	var clientUuid: UUID? = null,
+
+	/**
+	 * Marks this row as having been created through the inspector's SOS / favqulodda signal
+	 * (`POST /api/v1/inspector/me/sos`) rather than a normal incident report — orthogonal to
+	 * [type]/[status]: an SOS incident still uses the existing [IncidentType.SECURITY] +
+	 * [ActionType.DANGER_REPORTED] + [IncidentStatus.NEW] values (see
+	 * [uz.safecity.transportobserver.incidents.service.IncidentService.createSos] kdoc for why a
+	 * brand-new status was deliberately NOT added), so this flag is the only server-side signal
+	 * that distinguishes "inspector pressed the panic button" from an ordinary SECURITY report.
+	 * Also gates [uz.safecity.transportobserver.incidents.service.IncidentService.cancelSos]: only
+	 * an `isSos=true` row within its 5-second cancel window may be cancelled that way.
+	 */
+	@Column(name = "is_sos", nullable = false)
+	var isSos: Boolean = false
 
 ) : BaseEntity()

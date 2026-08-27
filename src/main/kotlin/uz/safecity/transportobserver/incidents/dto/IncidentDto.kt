@@ -43,7 +43,9 @@ data class IncidentDto(
 	 */
 	val evidenceCount: Long,
 	/** Last time this record (incl. its location/status) changed — see BaseEntity.updatedAt. */
-	val updatedAt: Instant?
+	val updatedAt: Instant?,
+	/** See [Incident.isSos] kdoc — true only for incidents created via `POST /inspector/me/sos`. */
+	val isSos: Boolean
 ) {
 	companion object {
 		fun from(incident: Incident, evidenceCount: Long = 0, assignedInspectorName: String? = null) = IncidentDto(
@@ -61,7 +63,8 @@ data class IncidentDto(
 			regionName = incident.regionName,
 			clientUuid = incident.clientUuid,
 			evidenceCount = evidenceCount,
-			updatedAt = incident.updatedAt
+			updatedAt = incident.updatedAt,
+			isSos = incident.isSos
 		)
 	}
 }
