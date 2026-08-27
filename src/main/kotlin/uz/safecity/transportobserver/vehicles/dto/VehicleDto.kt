@@ -75,3 +75,31 @@ data class UpdateVehicleStatusRequest(
 	@field:NotNull(message = "isActive majburiy")
 	val isActive: Boolean? = null
 )
+
+/**
+ * Lightweight projection for `GET /api/v1/inspector/vehicles` (mobile "hodisa qayd etish"
+ * transport picker) — see [uz.safecity.transportobserver.inspector.controller.InspectorPanelController.listVehiclesForPicker]
+ * kdoc for why this is a separate, INSPECTOR-facing endpoint rather than an extension of
+ * [uz.safecity.transportobserver.vehicles.controller.VehicleController.list].
+ *
+ * Deliberately only these 4 fields: [ownerType], [assignedEmployeeId], [regionName] and
+ * [isActive]/[VehicleDto.updatedAt] are admin/fleet bookkeeping the inspector has no reason to
+ * see when merely picking a vehicle to attach to an incident report. Only active vehicles are
+ * ever mapped to this DTO in the first place (see [uz.safecity.transportobserver.vehicles.service.VehicleService.listForInspectorPicker]),
+ * so there is no `isActive` field to expose here at all.
+ */
+data class VehiclePickerDto(
+	val id: UUID,
+	val plateNumber: String,
+	val model: String?,
+	val type: VehicleType
+) {
+	companion object {
+		fun from(vehicle: Vehicle) = VehiclePickerDto(
+			id = requireNotNull(vehicle.id),
+			plateNumber = vehicle.plateNumber,
+			model = vehicle.model,
+			type = vehicle.type
+		)
+	}
+}

@@ -25,7 +25,11 @@ import java.util.UUID
  * Same split-controller pattern as
  * [uz.safecity.transportobserver.checkpoints.controller.CheckpointController], while a
  * broader, unauthenticated-role-agnostic view (if/when needed) belongs on
- * [uz.safecity.transportobserver.map.controller.MapController].
+ * [uz.safecity.transportobserver.map.controller.MapController]. A narrower, INSPECTOR-facing
+ * picker (only active vehicles, only 4 non-admin fields, for the mobile incident-report flow) now
+ * lives on `GET /api/v1/inspector/vehicles` —
+ * [uz.safecity.transportobserver.inspector.controller.InspectorPanelController.listVehiclesForPicker] —
+ * rather than as a role carve-out on this endpoint's `list`.
  */
 @RestController
 @RequestMapping("/api/v1/vehicles")

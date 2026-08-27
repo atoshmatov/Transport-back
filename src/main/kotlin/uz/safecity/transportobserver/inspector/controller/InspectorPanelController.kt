@@ -2,6 +2,7 @@ package uz.safecity.transportobserver.inspector.controller
 
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
+import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.incidents.dto.CreateSosRequest
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
 import uz.safecity.transportobserver.incidents.service.IncidentService
@@ -17,7 +18,11 @@ import uz.safecity.transportobserver.map.service.InspectorLocationService
 import uz.safecity.transportobserver.shifts.dto.StartShiftRequest
 import uz.safecity.transportobserver.shifts.dto.WorkShiftDto
 import uz.safecity.transportobserver.shifts.service.WorkShiftService
+import uz.safecity.transportobserver.vehicles.dto.VehiclePickerDto
+import uz.safecity.transportobserver.vehicles.service.VehicleService
 import jakarta.validation.Valid
+import org.springframework.data.domain.Pageable
+import org.springframework.data.web.PageableDefault
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
@@ -27,6 +32,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -38,6 +44,9 @@ import java.util.UUID
  * instead — see that service's kdoc. `/me/shift/...` is backed by
  * [WorkShiftService] (`shifts` module) — see [uz.safecity.transportobserver.shifts.entity.WorkShift]
  * kdoc for how "on duty" (explicit shift check-in) differs from the `online` presence signal.
+ * `/vehicles` is backed by [VehicleService] (`vehicles` module) instead — see
+ * [listVehiclesForPicker] kdoc for why this is a separate, narrower endpoint from
+ * [uz.safecity.transportobserver.vehicles.controller.VehicleController.list].
  */
 @RestController
 @RequestMapping("/api/v1/inspector")
@@ -45,7 +54,8 @@ class InspectorPanelController(
 	private val inspectorPanelService: InspectorPanelService,
 	private val inspectorLocationService: InspectorLocationService,
 	private val workShiftService: WorkShiftService,
-	private val incidentService: IncidentService
+	private val incidentService: IncidentService,
+	private val vehicleService: VehicleService
 ) {
 
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
@@ -171,4 +181,30 @@ class InspectorPanelController(
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<IncidentDto>> =
 		ResponseEntity.ok(ApiResponse.ok(incidentService.cancelSos(id, principal)))
+
+	/**
+	 * Lightweight transport picker for the mobile "hodisa qayd etish" (report incident) flow —
+	 * an INSPECTOR may optionally attach a vehicle to a new incident report and needs *some* way
+	 * to look one up by plate number or model. Deliberately NOT the same endpoint as
+	 * [uz.safecity.transportobserver.vehicles.controller.VehicleController.list] — see that
+	 * controller's kdoc for why the full roster (with `ownerType`/`assignedEmployeeId`/
+	 * `regionName`/`isActive` and no page-size cap) is an Admin/Operator-only capability per the
+	 * TZ 5.6 permissions matrix. This endpoint instead:
+	 *  - is INSPECTOR-only (not admin-role-gated),
+	 *  - returns only [VehiclePickerDto]'s 4 fields (no admin bookkeeping data),
+	 *  - only ever returns active vehicles (see [VehicleService.listForInspectorPicker]),
+	 *  - defaults to a small page size (30) since this backs a search-as-you-type picker, not a
+	 *    full-roster admin table.
+	 * Not scoped to "my" vehicles (unlike this controller's other `/me/...` endpoints) — a vehicle
+	 * has no owning inspector concept (see [uz.safecity.transportobserver.vehicles.entity.Vehicle]
+	 * kdoc re: `assignedEmployeeId` being HR/fleet bookkeeping, not an auth principal), so every
+	 * active vehicle is a valid pick for any inspector.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@GetMapping("/vehicles")
+	fun listVehiclesForPicker(
+		@RequestParam(required = false) query: String?,
+		@PageableDefault(size = 30) pageable: Pageable
+	): ResponseEntity<ApiResponse<PageResponse<VehiclePickerDto>>> =
+		ResponseEntity.ok(ApiResponse.ok(vehicleService.listForInspectorPicker(query, pageable)))
 }

@@ -60,8 +60,16 @@ class CheckpointController(
 	/**
 	 * Mobile "Nazorat punkti" screen's "Navbatchi inspektorlar" list — see
 	 * [CheckpointStatsService.getOnDuty] kdoc.
+	 *
+	 * Unlike [list]/[getById] (the admin-only full roster — TZ 5.6), this one is deliberately
+	 * ALSO open to `ROLE_INSPECTOR`: it backs the mobile pointDetail screen that every field
+	 * inspector reaches from the map, not an admin console. It leaks nothing the admin-only
+	 * endpoints don't already: [CheckpointOnDutyInspectorDto]/[CheckpointTodayStatsDto]/
+	 * [CheckpointMetricsDto] carry only this one checkpoint's own roster/aggregate numbers, the
+	 * same shape as e.g. [uz.safecity.transportobserver.map.controller.MapController]'s
+	 * inspector-visible endpoints.
 	 */
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/{id}/on-duty")
 	fun getOnDuty(@PathVariable id: UUID): ResponseEntity<ApiResponse<List<CheckpointOnDutyInspectorDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getOnDuty(id)))
@@ -69,8 +77,9 @@ class CheckpointController(
 	/**
 	 * Mobile "Nazorat punkti" screen's "BUGUNGI HOLAT" block — see
 	 * [CheckpointStatsService.getTodayStats] kdoc (incl. why two of its fields are always `null`).
+	 * Also open to `ROLE_INSPECTOR` — see [getOnDuty] kdoc for why.
 	 */
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/{id}/today-stats")
 	fun getTodayStats(@PathVariable id: UUID): ResponseEntity<ApiResponse<CheckpointTodayStatsDto>> =
 		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getTodayStats(id)))
@@ -78,8 +87,9 @@ class CheckpointController(
 	/**
 	 * Mobile "Nazorat punkti" screen's header metrics ("Tekshiruv/oy" / "Aniqlangan holat" /
 	 * "Inspektor") — see [CheckpointStatsService.getMetrics] kdoc.
+	 * Also open to `ROLE_INSPECTOR` — see [getOnDuty] kdoc for why.
 	 */
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/{id}/metrics")
 	fun getMetrics(@PathVariable id: UUID): ResponseEntity<ApiResponse<CheckpointMetricsDto>> =
 		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getMetrics(id)))

@@ -9,6 +9,7 @@ import uz.safecity.transportobserver.employees.repository.EmployeeRepository
 import uz.safecity.transportobserver.vehicles.dto.CreateVehicleRequest
 import uz.safecity.transportobserver.vehicles.dto.UpdateVehicleRequest
 import uz.safecity.transportobserver.vehicles.dto.VehicleDto
+import uz.safecity.transportobserver.vehicles.dto.VehiclePickerDto
 import uz.safecity.transportobserver.vehicles.entity.Vehicle
 import uz.safecity.transportobserver.vehicles.entity.VehicleType
 import uz.safecity.transportobserver.vehicles.repository.VehicleRepository
@@ -50,6 +51,26 @@ class VehicleService(
 	/** Consumed by MapController/MapService if the `/map/vehicles` enrichment TODO is picked up — see VehicleRepository kdoc. */
 	fun listActiveForMap(): List<VehicleDto> =
 		vehicleRepository.findByIsActiveTrue().map { VehicleDto.from(it) }
+
+	/**
+	 * Backs `GET /api/v1/inspector/vehicles` — see
+	 * [uz.safecity.transportobserver.inspector.controller.InspectorPanelController.listVehiclesForPicker]
+	 * kdoc for why this is a separate, deliberately narrower sibling of [list]. Only
+	 * [uz.safecity.transportobserver.vehicles.entity.Vehicle.isActive] rows are ever returned (a
+	 * deactivated vehicle must not be selectable when reporting a new incident), and [query] — when
+	 * non-blank — does a case-insensitive substring match against plate number OR model, so an
+	 * inspector can find a vehicle either way without knowing which field they're typing into.
+	 */
+	fun listForInspectorPicker(query: String?, pageable: Pageable): PageResponse<VehiclePickerDto> {
+		val page = vehicleRepository.findAll(buildPickerSpecification(query), pageable)
+		return PageResponse(
+			content = page.content.map { VehiclePickerDto.from(it) },
+			page = page.number,
+			size = page.size,
+			totalElements = page.totalElements,
+			totalPages = page.totalPages
+		)
+	}
 
 	@Transactional
 	fun create(request: CreateVehicleRequest): VehicleDto {
@@ -129,6 +150,23 @@ class VehicleService(
 			isActive?.let { predicates.add(cb.equal(root.get<Boolean>("isActive"), it)) }
 			regionName?.let { predicates.add(cb.equal(root.get<String>("regionName"), it)) }
 			assignedEmployeeId?.let { predicates.add(cb.equal(root.get<UUID>("assignedEmployeeId"), it)) }
+			cb.and(*predicates.toTypedArray())
+		}
+
+	/** [listForInspectorPicker]'s filter: always `isActive = true`, plus an optional plate/model substring match. */
+	private fun buildPickerSpecification(query: String?): Specification<Vehicle> =
+		Specification { root, _, cb ->
+			val predicates = mutableListOf<Predicate>()
+			predicates.add(cb.isTrue(root.get("isActive")))
+			query?.trim()?.takeIf { it.isNotEmpty() }?.let { q ->
+				val likePattern = "%${q.lowercase()}%"
+				predicates.add(
+					cb.or(
+						cb.like(cb.lower(root.get<String>("plateNumber")), likePattern),
+						cb.like(cb.lower(root.get<String>("model")), likePattern)
+					)
+				)
+			}
 			cb.and(*predicates.toTypedArray())
 		}
 }
