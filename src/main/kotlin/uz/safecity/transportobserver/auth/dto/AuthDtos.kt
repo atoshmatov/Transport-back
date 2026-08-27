@@ -14,24 +14,49 @@ data class LoginRequest(
 )
 
 /**
- * The refresh token is deliberately NOT included here anymore — it travels as an
- * HttpOnly cookie (see [uz.safecity.transportobserver.auth.security.RefreshCookieFactory])
- * so client-side JS never has access to it. See AuthController kdoc for the full
- * cookie contract (name/path/attributes).
+ * The refresh token is NOT included here for web callers — it travels as an HttpOnly cookie (see
+ * [uz.safecity.transportobserver.auth.security.RefreshCookieFactory]) so client-side JS never has
+ * access to it. See AuthController kdoc for the full cookie contract (name/path/attributes).
+ *
+ * [refreshToken] is the one exception: it is populated ONLY when the request carried
+ * [uz.safecity.transportobserver.auth.security.ClientPlatform.HEADER_NAME] identifying a native
+ * mobile caller (see [uz.safecity.transportobserver.auth.controller.AuthController.login]) —
+ * Kotlin/Native's Ktor `HttpClient` has no cookie jar, so the mobile app cannot read a `Set-Cookie`
+ * response header and needs the token in the body instead. Web requests never send that header, so
+ * this field stays `null` for them and — thanks to `spring.jackson.default-property-inclusion:
+ * non_null` (application.yml) — is omitted from the JSON entirely, leaving the web wire contract
+ * byte-for-byte unchanged.
  */
 data class LoginResponse(
 	val accessToken: String,
 	val tokenType: String = "Bearer",
 	val expiresInSeconds: Long,
 	val mustChangePassword: Boolean,
-	val account: AccountSummary
+	val account: AccountSummary,
+	val refreshToken: String? = null
 )
 
-/** Same cookie-not-body rule as [LoginResponse] — see its kdoc. */
+/** Same cookie-vs-mobile-body rule as [LoginResponse] — see its kdoc. */
 data class RefreshResponse(
 	val accessToken: String,
 	val tokenType: String = "Bearer",
-	val expiresInSeconds: Long
+	val expiresInSeconds: Long,
+	val refreshToken: String? = null
+)
+
+/**
+ * Optional body for `POST /api/v1/auth/refresh`. Web callers send no body at all (refresh token
+ * comes from the cookie); the mobile app — which has no cookie jar, see [LoginResponse] kdoc —
+ * sends its stored refresh token here instead. See [uz.safecity.transportobserver.auth.controller.AuthController.refresh]
+ * for how the two sources are reconciled.
+ */
+data class RefreshRequest(
+	val refreshToken: String? = null
+)
+
+/** Same optional-body rationale as [RefreshRequest], for `POST /api/v1/auth/logout`. */
+data class LogoutRequest(
+	val refreshToken: String? = null
 )
 
 data class ChangePasswordRequest(
