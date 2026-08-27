@@ -222,7 +222,14 @@ class ReportStatsService(
 		private val DETECTED_VIOLATION_TYPES =
 			listOf(IncidentType.VIOLATION, IncidentType.TECHNICAL_FAULT, IncidentType.OTHER)
 
-		/** "Favqulodda hodisalar" dashboard card — see [getDashboard] kdoc for the type-split rationale. */
-		private val EMERGENCY_INCIDENT_TYPES = listOf(IncidentType.ACCIDENT, IncidentType.SECURITY)
+		/**
+		 * "Favqulodda hodisalar" dashboard card — see [getDashboard] kdoc for the type-split rationale.
+		 * [IncidentType.FIRE] and [IncidentType.MEDICAL] were added alongside the SOS "Holat turi"
+		 * picker (see [uz.safecity.transportobserver.incidents.dto.CreateSosRequest]) and belong here
+		 * too — both are, by definition, emergencies, and omitting them would silently undercount this
+		 * card the moment an inspector picks either as their SOS type.
+		 */
+		private val EMERGENCY_INCIDENT_TYPES =
+			listOf(IncidentType.ACCIDENT, IncidentType.SECURITY, IncidentType.FIRE, IncidentType.MEDICAL)
 	}
 }
