@@ -35,6 +35,18 @@ import java.util.UUID
  * on this index (`INSERT ... ON CONFLICT`) to make "start a shift" atomic — see that method's
  * kdoc; without the index, two concurrent start-shift calls for the same inspector could both
  * insert an open row.
+ *
+ * [checkpointId] is the [uz.safecity.transportobserver.checkpoints.entity.Checkpoint] the
+ * inspector declared they're posted at when they started this shift (`POST
+ * /api/v1/inspector/me/shift/start` accepts it as an optional field) — a plain FK column, no
+ * mapped JPA relation, same convention as [inspectorId]/every other "who/where" column in this
+ * codebase. Nullable and OPTIONAL: not every inspector is tied to a single fixed checkpoint (e.g.
+ * a roving inspector, or a client that hasn't been updated to send it yet), so omitting it must
+ * remain valid — never backfilled or guessed. This is the FIRST place in the codebase that links
+ * an inspector to a checkpoint at all (see the gap documented in
+ * [uz.safecity.transportobserver.inspector.service.InspectorPanelService] /
+ * [uz.safecity.transportobserver.map.dto.EmployeeLocationDto] kdocs); it only answers "which
+ * checkpoint did they check into for *this* shift", not a permanent assignment.
  */
 @Entity
 @Table(name = "work_shifts")
@@ -47,6 +59,10 @@ class WorkShift(
 	var startedAt: Instant,
 
 	@Column(name = "ended_at")
-	var endedAt: Instant? = null
+	var endedAt: Instant? = null,
+
+	/** Optional checkpoint check-in for this shift — see class kdoc. */
+	@Column(name = "checkpoint_id")
+	var checkpointId: UUID? = null
 
 ) : BaseEntity()

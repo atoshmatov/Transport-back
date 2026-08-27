@@ -15,16 +15,23 @@ import uz.safecity.transportobserver.common.util.StatusTransitionValidator
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
 import uz.safecity.transportobserver.incidents.dto.CreateSosRequest
+import uz.safecity.transportobserver.incidents.dto.IncidentDetailDto
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
+import uz.safecity.transportobserver.incidents.dto.IncidentStatusEventDto
 import uz.safecity.transportobserver.incidents.dto.SosBroadcastDto
+import uz.safecity.transportobserver.incidents.dto.UpdateIncidentResolutionRequest
 import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
+import uz.safecity.transportobserver.incidents.entity.IncidentStatusEvent
 import uz.safecity.transportobserver.incidents.entity.IncidentType
 import uz.safecity.transportobserver.incidents.event.SosCreatedEvent
 import uz.safecity.transportobserver.incidents.repository.EvidenceRepository
 import uz.safecity.transportobserver.incidents.repository.IncidentRepository
+import uz.safecity.transportobserver.incidents.repository.IncidentStatusEventRepository
 import uz.safecity.transportobserver.notifications.service.NotificationService
+import uz.safecity.transportobserver.vehicles.entity.Vehicle
+import uz.safecity.transportobserver.vehicles.repository.VehicleRepository
 import jakarta.persistence.criteria.Predicate
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
@@ -54,6 +61,8 @@ class IncidentService(
 	private val evidenceRepository: EvidenceRepository,
 	private val accountRepository: AccountRepository,
 	private val employeeRepository: EmployeeRepository,
+	private val vehicleRepository: VehicleRepository,
+	private val incidentStatusEventRepository: IncidentStatusEventRepository,
 	private val auditService: AuditService,
 	private val notificationService: NotificationService,
 	private val applicationEventPublisher: ApplicationEventPublisher
@@ -100,7 +109,12 @@ class IncidentService(
 		)
 	}
 
-	fun getById(id: UUID, principal: CustomUserDetails): IncidentDto {
+	/**
+	 * Returns the full "Hodisa kartasi" detail shape ([IncidentDetailDto]) — vehicle/passenger
+	 * info, the resolution snapshot, and the status-history timeline — see that DTO's kdoc for why
+	 * this is a separate, richer shape from [IncidentDto] (the list/board row shape).
+	 */
+	fun getById(id: UUID, principal: CustomUserDetails): IncidentDetailDto {
 		val incident = if (principal.role == RoleType.INSPECTOR) {
 			// Ownership check baked into the query itself (see repository kdoc):
 			// a foreign incident id returns empty here, so it surfaces as 404,
@@ -109,7 +123,7 @@ class IncidentService(
 		} else {
 			incidentRepository.findById(id)
 		}
-		return incident.map { toDto(it) }
+		return incident.map { toDetailDto(it) }
 			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
 	}
 
@@ -169,6 +183,8 @@ class IncidentService(
 			null
 		}
 
+		request.vehicleId?.let { validateVehicleExists(it) }
+
 		val incident = Incident(
 			title = request.title,
 			description = request.description,
@@ -179,7 +195,9 @@ class IncidentService(
 			occurredAt = request.occurredAt ?: Instant.now(),
 			assignedInspectorId = if (principal.role == RoleType.INSPECTOR) principal.accountId else assignOnCreateInspectorId,
 			regionName = null,
-			clientUuid = request.clientUuid
+			clientUuid = request.clientUuid,
+			vehicleId = request.vehicleId,
+			passengerCount = request.passengerCount
 		)
 		val saved = incidentRepository.save(incident)
 
@@ -190,6 +208,8 @@ class IncidentService(
 			entityId = saved.id,
 			metadata = "type=${saved.type}"
 		)
+
+		recordStatusEvent(requireNotNull(saved.id), STATUS_EVENT_RECORDED, IncidentStatus.NEW, principal.accountId)
 
 		// Notify the assigned inspector — but only when someone ELSE assigned them (assign-on-create
 		// by a SUPER_ADMIN/ADMIN/OPERATOR). An INSPECTOR caller always auto-assigns to themselves
@@ -283,6 +303,13 @@ class IncidentService(
 			metadata = "type=${saved.type}"
 		)
 
+		// Two timeline entries at once: the report itself, then the automatic broadcast to
+		// admins/operators that just happened below — see [IncidentStatusEvent] kdoc for why the
+		// second entry has no [actorAccountId] (system-triggered, not a human action).
+		val savedId = requireNotNull(saved.id)
+		recordStatusEvent(savedId, STATUS_EVENT_RECORDED, IncidentStatus.NEW, principal.accountId)
+		recordStatusEvent(savedId, STATUS_EVENT_BROADCAST_TO_CENTRAL, status = null, actorAccountId = null)
+
 		val inspectorName = resolveInspectorNames(listOf(principal.accountId))[principal.accountId]
 		notificationService.notifySosToAdmins(inspectorName, requireNotNull(saved.id))
 
@@ -343,6 +370,8 @@ class IncidentService(
 			entityId = id
 		)
 
+		recordStatusEvent(id, statusEventLabel(IncidentStatus.REJECTED), IncidentStatus.REJECTED, principal.accountId)
+
 		return toDto(saved)
 	}
 
@@ -383,6 +412,8 @@ class IncidentService(
 			entityId = id,
 			metadata = "inspectorAccountId=$inspectorAccountId"
 		)
+
+		recordStatusEvent(id, STATUS_EVENT_REVIEWED_BY_DEPARTMENT, status = null, actorAccountId = actorAccountId)
 
 		notificationService.notifyAssignment(inspectorAccountId, id, saved.title)
 
@@ -482,7 +513,125 @@ class IncidentService(
 			metadata = "status=$status"
 		)
 
+		recordStatusEvent(id, statusEventLabel(status), status, actorAccountId)
+
 		return toDto(saved)
+	}
+
+	/**
+	 * `PATCH /api/v1/incidents/{id}/resolution` — SUPER_ADMIN/ADMIN/OPERATOR only (see
+	 * [assertCanUpdateResolution]; INSPECTOR is deliberately excluded, unlike [updateStatus] —
+	 * recording the "ko'rilgan chora" is a dispatch/back-office action, not something a field
+	 * inspector does to their own case). Full REPLACE semantics — see [UpdateIncidentResolutionRequest]
+	 * kdoc for why an omitted field clears rather than leaves-untouched.
+	 *
+	 * Writes a single [STATUS_EVENT_ACTION_IN_PROGRESS] timeline entry per call (not one per
+	 * changed field) — mirrors the mobile "Hodisa kartasi" design, which shows "Chora ko'rilmoqda"
+	 * as one milestone, not a diff of what changed in the resolution snapshot.
+	 */
+	@Transactional
+	fun updateResolution(id: UUID, request: UpdateIncidentResolutionRequest, principal: CustomUserDetails): IncidentDto {
+		assertCanUpdateResolution(principal.role)
+
+		val incident = incidentRepository.findById(id)
+			.orElseThrow { ResourceNotFoundException("error.incident.not-found", id) }
+
+		request.resolutionResponsibleAccountId?.let { validateResolutionResponsibleAccount(it) }
+
+		incident.resolutionNote = request.resolutionNote
+		incident.fineAmount = request.fineAmount
+		incident.resolutionDeadline = request.resolutionDeadline
+		incident.resolutionResponsibleAccountId = request.resolutionResponsibleAccountId
+		val saved = incidentRepository.save(incident)
+
+		auditService.record(
+			actorAccountId = principal.accountId,
+			action = "INCIDENT_RESOLUTION_UPDATED",
+			entityType = "Incident",
+			entityId = id
+		)
+
+		recordStatusEvent(id, STATUS_EVENT_ACTION_IN_PROGRESS, status = null, actorAccountId = principal.accountId)
+
+		return toDto(saved)
+	}
+
+	/**
+	 * Service-level mirror of the controller's @PreAuthorize on
+	 * `PATCH /incidents/{id}/resolution` — same defense-in-depth rationale as
+	 * [assertCanAssignInspector]/[assertCanUpdateStatus]. INSPECTOR is deliberately NOT in the
+	 * allowed set — see [updateResolution] kdoc.
+	 */
+	private fun assertCanUpdateResolution(actorRole: RoleType) {
+		val allowed = setOf(RoleType.SUPER_ADMIN, RoleType.ADMIN, RoleType.OPERATOR)
+		if (actorRole !in allowed) {
+			throw ForbiddenException("error.incident.resolution-forbidden")
+		}
+	}
+
+	/** [UpdateIncidentResolutionRequest.resolutionResponsibleAccountId] must reference a real [Account] — any role, unlike [validateAssignableInspector]. */
+	private fun validateResolutionResponsibleAccount(accountId: UUID) {
+		if (!accountRepository.existsById(accountId)) {
+			throw BadRequestException("error.incident.resolution-responsible-account-not-found", accountId)
+		}
+	}
+
+	/** [CreateIncidentRequest.vehicleId] must reference a real [Vehicle] row — see that field's kdoc. */
+	private fun validateVehicleExists(vehicleId: UUID) {
+		if (!vehicleRepository.existsById(vehicleId)) {
+			throw BadRequestException("error.incident.vehicle-not-found", vehicleId)
+		}
+	}
+
+	/** Appends one row to the [IncidentStatusEvent] audit trail — see that entity's kdoc. */
+	private fun recordStatusEvent(incidentId: UUID, label: String, status: IncidentStatus?, actorAccountId: UUID?) {
+		incidentStatusEventRepository.save(
+			IncidentStatusEvent(
+				incidentId = incidentId,
+				label = label,
+				status = status,
+				actorAccountId = actorAccountId
+			)
+		)
+	}
+
+	/** Human-readable timeline label for a real [IncidentStatus] transition — see [IncidentStatusEvent] kdoc. */
+	private fun statusEventLabel(status: IncidentStatus): String = when (status) {
+		IncidentStatus.NEW -> STATUS_EVENT_RECORDED
+		IncidentStatus.IN_PROGRESS -> "Ko'rib chiqilmoqda"
+		IncidentStatus.RESOLVED -> "Yakunlandi"
+		IncidentStatus.REJECTED -> "Rad etildi"
+	}
+
+	/**
+	 * Builds the `GET /incidents/{id}` detail shape — vehicle lookup + status-history query are
+	 * only ever done for a single-record read, never for [list] (see [IncidentDetailDto] kdoc).
+	 */
+	private fun toDetailDto(incident: Incident): IncidentDetailDto {
+		val id = requireNotNull(incident.id)
+		val evidenceCount = evidenceRepository.countByIncidentId(id)
+		val assignedInspectorName = incident.assignedInspectorId?.let { resolveInspectorNames(listOf(it))[it] }
+		val vehicle = incident.vehicleId?.let { vehicleRepository.findById(it).orElse(null) }
+		val resolutionResponsibleName = incident.resolutionResponsibleAccountId
+			?.let { resolveInspectorNames(listOf(it))[it] }
+		val statusHistory = incidentStatusEventRepository.findByIncidentIdOrderByOccurredAtAsc(id).map { event ->
+			IncidentStatusEventDto(
+				label = event.label,
+				status = event.status,
+				actorAccountId = event.actorAccountId,
+				actorName = event.actorAccountId?.let { resolveInspectorNames(listOf(it))[it] },
+				occurredAt = event.occurredAt
+			)
+		}
+		return IncidentDetailDto.from(
+			incident,
+			evidenceCount,
+			assignedInspectorName,
+			vehicle?.plateNumber,
+			vehicle?.model,
+			resolutionResponsibleName,
+			statusHistory
+		)
 	}
 
 	/**
@@ -581,5 +730,13 @@ class IncidentService(
 
 		/** [cancelSos] window — see that method's kdoc. */
 		private val SOS_CANCEL_WINDOW: Duration = Duration.ofSeconds(5)
+
+		// --- IncidentStatusEvent timeline labels (mobile "Hodisa kartasi" design, TO-Screen.dc.html
+		// incidentDetail: "Qayd etildi -> Markaziy tizimga yuborildi -> Boshqarma tomonidan ko'rildi
+		// -> Chora ko'rilmoqda") — see [IncidentStatusEvent] kdoc.
+		private const val STATUS_EVENT_RECORDED = "Qayd etildi"
+		private const val STATUS_EVENT_BROADCAST_TO_CENTRAL = "Markaziy tizimga yuborildi"
+		private const val STATUS_EVENT_REVIEWED_BY_DEPARTMENT = "Boshqarma tomonidan ko'rildi"
+		private const val STATUS_EVENT_ACTION_IN_PROGRESS = "Chora ko'rilmoqda"
 	}
 }

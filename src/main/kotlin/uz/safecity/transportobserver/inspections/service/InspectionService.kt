@@ -11,11 +11,17 @@ import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.util.StatusTransitionValidator
+import uz.safecity.transportobserver.inspections.dto.ChecklistItemRequest
 import uz.safecity.transportobserver.inspections.dto.CreateInspectionRequest
+import uz.safecity.transportobserver.inspections.dto.InspectionDetailDto
 import uz.safecity.transportobserver.inspections.dto.InspectionDto
 import uz.safecity.transportobserver.inspections.entity.Inspection
+import uz.safecity.transportobserver.inspections.entity.InspectionChecklistItem
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
+import uz.safecity.transportobserver.inspections.entity.InspectionStatusEvent
+import uz.safecity.transportobserver.inspections.repository.InspectionChecklistItemRepository
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
+import uz.safecity.transportobserver.inspections.repository.InspectionStatusEventRepository
 import jakarta.persistence.criteria.Predicate
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.domain.Specification
@@ -40,7 +46,9 @@ class InspectionService(
 	private val inspectionRepository: InspectionRepository,
 	private val checkpointRepository: CheckpointRepository,
 	private val accountRepository: AccountRepository,
-	private val auditService: AuditService
+	private val auditService: AuditService,
+	private val checklistItemRepository: InspectionChecklistItemRepository,
+	private val statusEventRepository: InspectionStatusEventRepository
 ) {
 
 	/**
@@ -74,7 +82,12 @@ class InspectionService(
 		)
 	}
 
-	fun getById(id: UUID, principal: CustomUserDetails): InspectionDto {
+	/**
+	 * `GET /inspections/{id}` — the mobile/web "Tekshiruv hisoboti" detail screen. Returns
+	 * [InspectionDetailDto] (checklist + signatures + JARAYON timeline), unlike [list]'s plain
+	 * [InspectionDto] — see that DTO's kdoc for why the two shapes are kept separate.
+	 */
+	fun getById(id: UUID, principal: CustomUserDetails): InspectionDetailDto {
 		val inspection = if (principal.role == RoleType.INSPECTOR) {
 			// Ownership check baked into the query itself (see repository kdoc): a foreign
 			// inspection id returns empty here, so it surfaces as 404, never as "found but
@@ -85,7 +98,9 @@ class InspectionService(
 		}.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 
 		val checkpoint = checkpointRepository.findById(inspection.checkpointId).orElse(null)
-		return InspectionDto.from(inspection, checkpoint)
+		val checklistItems = checklistItemRepository.findByInspectionIdOrderByOrderIndexAsc(id)
+		val statusHistory = statusEventRepository.findByInspectionIdOrderByOccurredAtAsc(id)
+		return InspectionDetailDto.from(inspection, checkpoint, checklistItems, statusHistory)
 	}
 
 	/**
@@ -141,9 +156,32 @@ class InspectionService(
 	 * Status transitions follow [STATUS_TRANSITIONS] (see that constant's kdoc for the graph).
 	 * SUPER_ADMIN/ADMIN bypass it entirely — see [assertValidTransition] kdoc — OPERATOR/INSPECTOR
 	 * are held to it strictly, mirroring [uz.safecity.transportobserver.incidents.service.IncidentService.assertValidTransition].
+	 *
+	 * ENG ODDIY contract for the "Tekshiruv hisoboti" detail screen (`TO-Screen.dc.html`
+	 * `reportDetail`): there is no separate `/complete` endpoint and no server-side checklist
+	 * template. This SAME endpoint doubles as the completion call — the mobile client (which
+	 * already knows the checklist's band names) submits the full "BANDLAR NATIJASI" list via
+	 * [checklistItems], plus the "TASDIQ VA IMZOLAR" signals ([driverConfirmed]/[witnessName]),
+	 * together with `status = COMPLETED`. All three are ignored for any other target [status] —
+	 * see [uz.safecity.transportobserver.inspections.dto.UpdateInspectionStatusRequest] kdoc.
+	 * This also writes the "JARAYON" timeline ([InspectionStatusEvent]):
+	 * - PLANNED -> IN_PROGRESS writes "Tekshiruv boshlandi".
+	 * - -> COMPLETED writes, in order: "Bandlar to'ldirildi" (only if [checklistItems] is
+	 *   non-empty), "Imzolar olindi" (only if this call newly set the inspector and/or driver
+	 *   signature timestamp — see [Inspection.inspectorSignedAt]/[Inspection.driverSignedAt]
+	 *   kdoc for what "signed" means here), then always "Markazga yuborildi".
 	 */
 	@Transactional
-	fun updateStatus(id: UUID, status: InspectionStatus, notes: String?, actorAccountId: UUID?, actorRole: RoleType): InspectionDto {
+	fun updateStatus(
+		id: UUID,
+		status: InspectionStatus,
+		notes: String?,
+		actorAccountId: UUID?,
+		actorRole: RoleType,
+		checklistItems: List<ChecklistItemRequest>? = null,
+		driverConfirmed: Boolean = false,
+		witnessName: String? = null
+	): InspectionDto {
 		assertCanUpdateStatus(actorRole)
 
 		val inspection = if (actorRole == RoleType.INSPECTOR) {
@@ -156,13 +194,23 @@ class InspectionService(
 				.orElseThrow { ResourceNotFoundException("error.inspection.not-found", id) }
 		}
 
-		assertValidTransition(inspection.status, status, actorRole)
+		val previousStatus = inspection.status
+		assertValidTransition(previousStatus, status, actorRole)
 
 		inspection.status = status
 		notes?.let { inspection.notes = it }
 		if (status == InspectionStatus.COMPLETED && inspection.performedAt == null) {
 			inspection.performedAt = Instant.now()
 		}
+
+		if (previousStatus != InspectionStatus.IN_PROGRESS && status == InspectionStatus.IN_PROGRESS) {
+			statusEventRepository.save(InspectionStatusEvent(inspectionId = id, label = "Tekshiruv boshlandi"))
+		}
+
+		if (status == InspectionStatus.COMPLETED) {
+			completeChecklistAndSignatures(id, inspection, checklistItems, driverConfirmed, witnessName)
+		}
+
 		val saved = inspectionRepository.save(inspection)
 
 		auditService.record(
@@ -175,6 +223,55 @@ class InspectionService(
 
 		val checkpoint = checkpointRepository.findById(saved.checkpointId).orElse(null)
 		return InspectionDto.from(saved, checkpoint)
+	}
+
+	/**
+	 * The "checklist + signatures + JARAYON" half of completing an inspection — split out of
+	 * [updateStatus] purely to keep that method's already-long kdoc/state-machine logic readable.
+	 * Only ever called when [status] is being set to [InspectionStatus.COMPLETED]; see
+	 * [updateStatus] kdoc for the full ordering contract.
+	 */
+	private fun completeChecklistAndSignatures(
+		id: UUID,
+		inspection: Inspection,
+		checklistItems: List<ChecklistItemRequest>?,
+		driverConfirmed: Boolean,
+		witnessName: String?
+	) {
+		if (!checklistItems.isNullOrEmpty()) {
+			// Wholesale replace — see InspectionChecklistItem kdoc for why this isn't a diff/upsert.
+			checklistItemRepository.deleteByInspectionId(id)
+			checklistItemRepository.saveAll(
+				checklistItems.mapIndexed { index, item ->
+					InspectionChecklistItem(
+						inspectionId = id,
+						label = requireNotNull(item.label),
+						result = requireNotNull(item.result),
+						deficiencyNote = item.deficiencyNote,
+						orderIndex = index
+					)
+				}
+			)
+			statusEventRepository.save(InspectionStatusEvent(inspectionId = id, label = "Bandlar to'ldirildi"))
+		}
+
+		var signedThisCall = false
+		if (inspection.inspectorSignedAt == null) {
+			inspection.inspectorSignedAt = Instant.now()
+			signedThisCall = true
+		}
+		if (driverConfirmed && inspection.driverSignedAt == null) {
+			inspection.driverSignedAt = Instant.now()
+			signedThisCall = true
+		}
+		if (!witnessName.isNullOrBlank()) {
+			inspection.witnessName = witnessName
+		}
+		if (signedThisCall) {
+			statusEventRepository.save(InspectionStatusEvent(inspectionId = id, label = "Imzolar olindi"))
+		}
+
+		statusEventRepository.save(InspectionStatusEvent(inspectionId = id, label = "Markazga yuborildi"))
 	}
 
 	/** Defense-in-depth mirror of the controller's @PreAuthorize on `POST /inspections`. */

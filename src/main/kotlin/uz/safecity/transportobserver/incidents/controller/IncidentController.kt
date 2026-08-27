@@ -6,7 +6,9 @@ import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.incidents.dto.AssignInspectorRequest
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
 import uz.safecity.transportobserver.incidents.dto.EvidenceDto
+import uz.safecity.transportobserver.incidents.dto.IncidentDetailDto
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
+import uz.safecity.transportobserver.incidents.dto.UpdateIncidentResolutionRequest
 import uz.safecity.transportobserver.incidents.dto.UpdateIncidentStatusRequest
 import uz.safecity.transportobserver.incidents.entity.IncidentStatus
 import uz.safecity.transportobserver.incidents.entity.IncidentType
@@ -77,7 +79,7 @@ class IncidentController(
 	fun getById(
 		@PathVariable id: UUID,
 		@AuthenticationPrincipal principal: CustomUserDetails
-	): ResponseEntity<ApiResponse<IncidentDto>> =
+	): ResponseEntity<ApiResponse<IncidentDetailDto>> =
 		ResponseEntity.ok(ApiResponse.ok(incidentService.getById(id, principal)))
 
 	// Assignment is an admin/dispatch action, not something an inspector does
@@ -99,6 +101,19 @@ class IncidentController(
 				)
 			)
 		)
+
+	// "Ko'rilgan chora" (resolution) — a dispatch/back-office action, same 3 roles as /assign.
+	// INSPECTOR deliberately excluded (unlike /status): recording a resolution's note/fine/deadline/
+	// responsible person is not something a field inspector does to their own case — see
+	// IncidentService#updateResolution kdoc.
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@PatchMapping("/{id}/resolution")
+	fun updateResolution(
+		@PathVariable id: UUID,
+		@Valid @RequestBody request: UpdateIncidentResolutionRequest,
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<IncidentDto>> =
+		ResponseEntity.ok(ApiResponse.ok(incidentService.updateResolution(id, request, principal)))
 
 	// Unlike /assign, INSPECTOR IS allowed here — a field inspector marking their own
 	// assigned incident's status (e.g. "yakunlandi"). IncidentService#updateStatus scopes

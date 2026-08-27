@@ -12,6 +12,15 @@ interface InspectorLocationRepository : JpaRepository<InspectorLocation, UUID> {
 	fun findByInspectorId(inspectorId: UUID): InspectorLocation?
 
 	/**
+	 * Batched sibling of [findByInspectorId] — backs
+	 * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getOnDuty], which
+	 * needs the GPS-heartbeat signal for a whole checkpoint's on-duty roster in one query instead
+	 * of one `findByInspectorId` call per row (same N+1-avoidance pattern as
+	 * [uz.safecity.transportobserver.auth.repository.AccountRepository.findByEmployeeIdIn]).
+	 */
+	fun findByInspectorIdIn(inspectorIds: Collection<UUID>): List<InspectorLocation>
+
+	/**
 	 * Atomic upsert backing
 	 * [uz.safecity.transportobserver.map.service.InspectorLocationService.upsertMyLocation] —
 	 * replaces the previous find-then-save (`findByInspectorId` + `save`), which raced under

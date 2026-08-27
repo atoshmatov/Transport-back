@@ -49,6 +49,19 @@ interface InspectionRepository : JpaRepository<Inspection, UUID>, JpaSpecificati
 	fun countByStatusAndPerformedAtBetween(status: InspectionStatus, start: Instant, end: Instant): Long
 
 	/**
+	 * Checkpoint-detail screen's "bugungi holat" (today) / "Tekshiruv/oy" (this month) counters —
+	 * see [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getTodayStats] /
+	 * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getMetrics]. Same
+	 * shape as [countByStatusAndPerformedAtBetween], just additionally scoped to one checkpoint.
+	 */
+	fun countByCheckpointIdAndStatusAndPerformedAtBetween(
+		checkpointId: UUID,
+		status: InspectionStatus,
+		start: Instant,
+		end: Instant
+	): Long
+
+	/**
 	 * Ratings `me`/`top` completed-count (RatingService) — system-wide count for a single inspector
 	 * account, unlike [countByAssignedInspectorIdAndStatusIn] which takes a status collection for the
 	 * inspector panel's PLANNED+IN_PROGRESS "open" count.
@@ -87,6 +100,33 @@ interface InspectionRepository : JpaRepository<Inspection, UUID>, JpaSpecificati
 	 */
 	@Query("select i.assignedInspectorId as accountId, count(i) as cnt from Inspection i where i.status = :status and i.assignedInspectorId is not null group by i.assignedInspectorId")
 	fun countCompletedGroupByInspector(@Param("status") status: InspectionStatus): List<InspectorCompletedCountProjection>
+
+	/**
+	 * Checkpoint-detail screen's "Inspektor" metric
+	 * ([uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getMetrics]) —
+	 * count of DISTINCT inspectors assigned at least one [Inspection] at [checkpointId] whose
+	 * [Inspection.createdAt] falls in `[start, end)` (the current month). Uses `createdAt`, not
+	 * `scheduledAt`/`performedAt`, for the same reason as [countDailyCreatedBetween]: it's the one
+	 * timestamp that's always non-null and reliably answers "was this task on the books this
+	 * month", regardless of whether it's been performed yet. Answers "how many distinct inspectors
+	 * touched this checkpoint this month", NOT "how many are on duty right now" — that's a
+	 * different, real-time question answered by
+	 * [uz.safecity.transportobserver.shifts.service.WorkShiftService.openShiftsForCheckpoint]
+	 * instead.
+	 */
+	@Query(
+		"""
+			select count(distinct i.assignedInspectorId) from Inspection i
+			where i.checkpointId = :checkpointId
+			and i.assignedInspectorId is not null
+			and i.createdAt >= :start and i.createdAt < :end
+		"""
+	)
+	fun countDistinctInspectorsByCheckpointIdAndCreatedAtBetween(
+		@Param("checkpointId") checkpointId: UUID,
+		@Param("start") start: Instant,
+		@Param("end") end: Instant
+	): Long
 }
 
 /**

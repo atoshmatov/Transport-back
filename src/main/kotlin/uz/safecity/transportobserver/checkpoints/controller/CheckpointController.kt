@@ -1,7 +1,11 @@
 package uz.safecity.transportobserver.checkpoints.controller
 
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointDto
+import uz.safecity.transportobserver.checkpoints.dto.CheckpointMetricsDto
+import uz.safecity.transportobserver.checkpoints.dto.CheckpointOnDutyInspectorDto
+import uz.safecity.transportobserver.checkpoints.dto.CheckpointTodayStatsDto
 import uz.safecity.transportobserver.checkpoints.service.CheckpointService
+import uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
 import org.springframework.data.domain.Pageable
@@ -30,7 +34,8 @@ import java.util.UUID
 @RestController
 @RequestMapping("/api/v1/checkpoints")
 class CheckpointController(
-	private val checkpointService: CheckpointService
+	private val checkpointService: CheckpointService,
+	private val checkpointStatsService: CheckpointStatsService
 ) {
 
 	// TZ 5.6-bo'lim (ruxsatlar matritsasi): the full checkpoint roster is an
@@ -51,4 +56,31 @@ class CheckpointController(
 	@GetMapping("/{id}")
 	fun getById(@PathVariable id: UUID): ResponseEntity<ApiResponse<CheckpointDto>> =
 		ResponseEntity.ok(ApiResponse.ok(checkpointService.getById(id)))
+
+	/**
+	 * Mobile "Nazorat punkti" screen's "Navbatchi inspektorlar" list — see
+	 * [CheckpointStatsService.getOnDuty] kdoc.
+	 */
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@GetMapping("/{id}/on-duty")
+	fun getOnDuty(@PathVariable id: UUID): ResponseEntity<ApiResponse<List<CheckpointOnDutyInspectorDto>>> =
+		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getOnDuty(id)))
+
+	/**
+	 * Mobile "Nazorat punkti" screen's "BUGUNGI HOLAT" block — see
+	 * [CheckpointStatsService.getTodayStats] kdoc (incl. why two of its fields are always `null`).
+	 */
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@GetMapping("/{id}/today-stats")
+	fun getTodayStats(@PathVariable id: UUID): ResponseEntity<ApiResponse<CheckpointTodayStatsDto>> =
+		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getTodayStats(id)))
+
+	/**
+	 * Mobile "Nazorat punkti" screen's header metrics ("Tekshiruv/oy" / "Aniqlangan holat" /
+	 * "Inspektor") — see [CheckpointStatsService.getMetrics] kdoc.
+	 */
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@GetMapping("/{id}/metrics")
+	fun getMetrics(@PathVariable id: UUID): ResponseEntity<ApiResponse<CheckpointMetricsDto>> =
+		ResponseEntity.ok(ApiResponse.ok(checkpointStatsService.getMetrics(id)))
 }

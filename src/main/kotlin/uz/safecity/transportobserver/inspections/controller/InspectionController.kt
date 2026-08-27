@@ -4,6 +4,7 @@ import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.inspections.dto.CreateInspectionRequest
+import uz.safecity.transportobserver.inspections.dto.InspectionDetailDto
 import uz.safecity.transportobserver.inspections.dto.InspectionDto
 import uz.safecity.transportobserver.inspections.dto.UpdateInspectionStatusRequest
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
@@ -59,7 +60,7 @@ class InspectionController(
 	fun getById(
 		@PathVariable id: UUID,
 		@AuthenticationPrincipal principal: CustomUserDetails
-	): ResponseEntity<ApiResponse<InspectionDto>> =
+	): ResponseEntity<ApiResponse<InspectionDetailDto>> =
 		ResponseEntity.ok(ApiResponse.ok(inspectionService.getById(id, principal)))
 
 	// Scheduling a new inspection is an admin/dispatch action, not something an inspector does
@@ -92,7 +93,10 @@ class InspectionController(
 					requireNotNull(request.status),
 					request.notes,
 					principal.accountId,
-					principal.role
+					principal.role,
+					request.checklistItems,
+					request.driverConfirmed,
+					request.witnessName
 				)
 			)
 		)

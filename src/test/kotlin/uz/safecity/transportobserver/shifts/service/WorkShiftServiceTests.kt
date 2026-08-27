@@ -2,6 +2,9 @@ package uz.safecity.transportobserver.shifts.service
 
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
+import uz.safecity.transportobserver.checkpoints.dto.CreateCheckpointRequest
+import uz.safecity.transportobserver.checkpoints.service.CheckpointService
+import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ConflictException
 import uz.safecity.transportobserver.shifts.dto.WorkShiftDto
 import uz.safecity.transportobserver.shifts.repository.WorkShiftRepository
@@ -52,6 +55,9 @@ class WorkShiftServiceTests {
 
 	@Autowired
 	lateinit var workShiftRepository: WorkShiftRepository
+
+	@Autowired
+	lateinit var checkpointService: CheckpointService
 
 	private val createdShiftIds = mutableListOf<UUID>()
 
@@ -137,5 +143,48 @@ class WorkShiftServiceTests {
 		val open = workShiftRepository.findByInspectorIdAndEndedAtIsNull(principal.accountId)
 		assertNotNull(open)
 		assertEquals(successes.first().getOrNull()?.id, open?.id)
+	}
+
+	@Test
+	@Transactional
+	fun `startShift with a valid checkpointId persists the checkpoint check-in`() {
+		val checkpoint = checkpointService.create(
+			CreateCheckpointRequest(name = "Test nazorat punkti", latitude = 41.3, longitude = 69.2)
+		)
+		val principal = inspectorPrincipal()
+
+		val dto = workShiftService.startShift(principal, checkpoint.id)
+		createdShiftIds += dto.id
+
+		assertEquals(checkpoint.id, dto.checkpointId)
+		val persisted = workShiftRepository.findByInspectorIdAndEndedAtIsNull(principal.accountId)
+		assertNotNull(persisted)
+		assertEquals(checkpoint.id, persisted?.checkpointId)
+	}
+
+	@Test
+	@Transactional
+	fun `startShift with no checkpointId leaves the check-in null`() {
+		val principal = inspectorPrincipal()
+
+		val dto = workShiftService.startShift(principal)
+		createdShiftIds += dto.id
+
+		assertNull(dto.checkpointId)
+		val persisted = workShiftRepository.findByInspectorIdAndEndedAtIsNull(principal.accountId)
+		assertNull(persisted?.checkpointId)
+	}
+
+	@Test
+	@Transactional
+	fun `startShift with an unknown checkpointId throws BadRequestException and inserts nothing`() {
+		val principal = inspectorPrincipal()
+		val unknownCheckpointId = UUID.randomUUID()
+
+		assertThrows(BadRequestException::class.java) {
+			workShiftService.startShift(principal, unknownCheckpointId)
+		}
+
+		assertNull(workShiftRepository.findByInspectorIdAndEndedAtIsNull(principal.accountId))
 	}
 }

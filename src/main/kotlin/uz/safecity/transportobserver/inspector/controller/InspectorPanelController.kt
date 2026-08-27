@@ -14,6 +14,7 @@ import uz.safecity.transportobserver.inspector.dto.RecentActivityDto
 import uz.safecity.transportobserver.inspector.service.InspectorPanelService
 import uz.safecity.transportobserver.map.dto.UpdateInspectorLocationRequest
 import uz.safecity.transportobserver.map.service.InspectorLocationService
+import uz.safecity.transportobserver.shifts.dto.StartShiftRequest
 import uz.safecity.transportobserver.shifts.dto.WorkShiftDto
 import uz.safecity.transportobserver.shifts.service.WorkShiftService
 import jakarta.validation.Valid
@@ -109,13 +110,21 @@ class InspectorPanelController(
 		return ResponseEntity.noContent().build()
 	}
 
-	/** "Ishga chiqdim" — opens a new shift. `409` (via [uz.safecity.transportobserver.common.exception.ConflictException]) if one is already open. */
+	/**
+	 * "Ishga chiqdim" — opens a new shift. `409` (via [uz.safecity.transportobserver.common.exception.ConflictException])
+	 * if one is already open. The body is optional (mirrors [createSos]'s "optional body"
+	 * convention) — an older mobile client that sends no body, or an empty one, simply starts a
+	 * shift with no checkpoint check-in, see [StartShiftRequest]/[uz.safecity.transportobserver.shifts.entity.WorkShift.checkpointId] kdoc.
+	 */
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
 	@PostMapping("/me/shift/start")
 	fun startShift(
-		@AuthenticationPrincipal principal: CustomUserDetails
+		@AuthenticationPrincipal principal: CustomUserDetails,
+		@RequestBody(required = false) request: StartShiftRequest?
 	): ResponseEntity<ApiResponse<WorkShiftDto>> =
-		ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(workShiftService.startShift(principal)))
+		ResponseEntity.status(HttpStatus.CREATED).body(
+			ApiResponse.ok(workShiftService.startShift(principal, request?.checkpointId))
+		)
 
 	/** "Ishni tugatdim" — closes the caller's open shift. `409` if there is none. */
 	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")

@@ -42,8 +42,8 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 	@Modifying
 	@Query(
 		value = """
-			insert into work_shifts (id, inspector_id, started_at, created_at, updated_at, version)
-			values (:id, :inspectorId, :startedAt, :now, :now, 0)
+			insert into work_shifts (id, inspector_id, started_at, checkpoint_id, created_at, updated_at, version)
+			values (:id, :inspectorId, :startedAt, :checkpointId, :now, :now, 0)
 			on conflict (inspector_id) where ended_at is null do nothing
 		""",
 		nativeQuery = true
@@ -52,6 +52,7 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 		@Param("id") id: UUID,
 		@Param("inspectorId") inspectorId: UUID,
 		@Param("startedAt") startedAt: Instant,
+		@Param("checkpointId") checkpointId: UUID?,
 		@Param("now") now: Instant
 	): Int
 
@@ -72,4 +73,15 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 	 * without calling `end`). See that class's kdoc for the staleness threshold and why.
 	 */
 	fun findByEndedAtIsNullAndStartedAtBefore(cutoff: Instant): List<WorkShift>
+
+	/**
+	 * Every currently-open shift checked into [checkpointId] — backs
+	 * [uz.safecity.transportobserver.shifts.service.WorkShiftService.openShiftsForCheckpoint], which
+	 * in turn backs the mobile "Nazorat punkti" screen's "Navbatchi inspektorlar" roster
+	 * ([uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getOnDuty]). Only
+	 * inspectors who explicitly checked into THIS checkpoint when starting their shift show up here
+	 * — see [WorkShift.checkpointId] kdoc re: this being optional/per-shift, not a permanent
+	 * assignment.
+	 */
+	fun findByCheckpointIdAndEndedAtIsNull(checkpointId: UUID): List<WorkShift>
 }

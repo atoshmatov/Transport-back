@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Table
 import org.locationtech.jts.geom.Point
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 enum class IncidentStatus { NEW, IN_PROGRESS, RESOLVED, REJECTED }
@@ -116,6 +117,67 @@ class Incident(
 	 * an `isSos=true` row within its 5-second cancel window may be cancelled that way.
 	 */
 	@Column(name = "is_sos", nullable = false)
-	var isSos: Boolean = false
+	var isSos: Boolean = false,
+
+	/**
+	 * Transport vehicle involved in this incident (FK -> [uz.safecity.transportobserver.vehicles.entity.Vehicle.id]),
+	 * set by the INSPECTOR while filing the report on the mobile `ReportIncidentScreen`
+	 * (`TO-Screen.dc.html` incidentDetail: "ISUZU NQR 71 - avtobus" transport line). Nullable: a
+	 * report is not always about a specific vehicle (e.g. a generic SECURITY/FIRE/MEDICAL SOS), and
+	 * even when it is, the vehicle may not be identifiable on-site (no plate visible, lookup
+	 * failed) — the report must still go through, same "must not block on a field the client
+	 * doesn't always have" reasoning as [actionType]/[location]. Plain UUID column (not a mapped
+	 * JPA relation), matching every other cross-module reference on this entity
+	 * ([assignedInspectorId], [reportedBy]) — see those kdocs. No other source ever sets this
+	 * (ReportIncidentScreen is the only writer).
+	 */
+	@Column(name = "vehicle_id")
+	var vehicleId: UUID? = null,
+
+	/**
+	 * Passenger count observed by the inspector at the time of the report (mobile
+	 * `ReportIncidentScreen` / "Hodisa kartasi" `incidentDetail`: "Yo'lovchilar soni", e.g. "32").
+	 * Nullable for the same reason as [vehicleId]: not every report involves counting passengers
+	 * (e.g. a TECHNICAL_FAULT report about a parked, empty vehicle), and there is no other source
+	 * for this number — it is a point-in-time human observation, not derived from any sensor or
+	 * registry.
+	 */
+	@Column(name = "passenger_count")
+	var passengerCount: Int? = null,
+
+	/**
+	 * "Ko'rilgan chora" (resolution) note — set ONLY via
+	 * `PATCH /api/v1/incidents/{id}/resolution` (SUPER_ADMIN/ADMIN/OPERATOR only, see
+	 * [uz.safecity.transportobserver.incidents.service.IncidentService.updateResolution]). Free
+	 * text rather than an enum: the mobile "Hodisa kartasi" design (`TO-Screen.dc.html`
+	 * incidentDetail) shows this as a short human sentence ("Bayonnoma tuzildi"), not a fixed
+	 * status code, and the TZ does not yet enumerate the possible actions an operator can record.
+	 */
+	@Column(name = "resolution_note", columnDefinition = "text")
+	var resolutionNote: String? = null,
+
+	/**
+	 * Fine amount tied to the resolution, kept as free text rather than [java.math.BigDecimal]:
+	 * the mobile design shows values in mixed units this app doesn't otherwise model — e.g.
+	 * "1 BHM" (bazaviy hisoblash miqdori), not always a plain currency figure. No other module in
+	 * this codebase stores a money/BHM value today (nothing established to be consistent with),
+	 * so turning "1 BHM" into a structured amount+unit would be speculative modeling ahead of an
+	 * actual requirement, not a real conversion.
+	 */
+	@Column(name = "fine_amount")
+	var fineAmount: String? = null,
+
+	/** Deadline by which [resolutionResponsibleAccountId] is expected to complete the resolution. */
+	@Column(name = "resolution_deadline")
+	var resolutionDeadline: LocalDate? = null,
+
+	/**
+	 * The [uz.safecity.transportobserver.auth.entity.Account.id] responsible for carrying out the
+	 * resolution — same "points at Account, not Employee" convention as [assignedInspectorId] (see
+	 * that field's kdoc). Nullable: a resolution can be recorded before a specific responsible
+	 * person is named.
+	 */
+	@Column(name = "resolution_responsible_account_id")
+	var resolutionResponsibleAccountId: UUID? = null
 
 ) : BaseEntity()

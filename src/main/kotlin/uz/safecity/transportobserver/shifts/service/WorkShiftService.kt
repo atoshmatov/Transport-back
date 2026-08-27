@@ -2,8 +2,11 @@ package uz.safecity.transportobserver.shifts.service
 
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
+import uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository
+import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ConflictException
 import uz.safecity.transportobserver.common.exception.ForbiddenException
+import uz.safecity.transportobserver.shifts.dto.CheckpointOpenShiftDto
 import uz.safecity.transportobserver.shifts.dto.WorkShiftDto
 import uz.safecity.transportobserver.shifts.entity.WorkShift
 import uz.safecity.transportobserver.shifts.repository.WorkShiftRepository
@@ -23,12 +26,17 @@ import java.util.UUID
  */
 @Service
 class WorkShiftService(
-	private val workShiftRepository: WorkShiftRepository
+	private val workShiftRepository: WorkShiftRepository,
+	private val checkpointRepository: CheckpointRepository
 ) {
 
 	/**
 	 * `POST /api/v1/inspector/me/shift/start`. Rejects with [ConflictException] if the caller
 	 * already has an open shift — see [WorkShift] kdoc re: at most one open shift per inspector.
+	 * [checkpointId] is optional — see [WorkShift.checkpointId] kdoc — but if given, it must
+	 * reference a real checkpoint ([BadRequestException] otherwise, mirroring
+	 * [uz.safecity.transportobserver.inspections.service.InspectionService.create]'s
+	 * checkpoint-existence check).
 	 *
 	 * Uses [WorkShiftRepository.startIfNoOpenShift] (atomic `INSERT ... ON CONFLICT`) rather than
 	 * a find-then-save — a plain `findByInspectorIdAndEndedAtIsNull` + `save` is not safe here:
@@ -38,8 +46,13 @@ class WorkShiftService(
 	 * [uz.safecity.transportobserver.map.service.InspectorLocationService.upsertMyLocation]).
 	 */
 	@Transactional
-	fun startShift(principal: CustomUserDetails): WorkShiftDto {
+	fun startShift(principal: CustomUserDetails, checkpointId: UUID? = null): WorkShiftDto {
 		assertInspector(principal.role)
+		checkpointId?.let {
+			if (!checkpointRepository.existsById(it)) {
+				throw BadRequestException("error.shift.checkpoint-not-found", it)
+			}
+		}
 
 		val id = UUID.randomUUID()
 		val startedAt = Instant.now()
@@ -47,13 +60,20 @@ class WorkShiftService(
 			id = id,
 			inspectorId = principal.accountId,
 			startedAt = startedAt,
+			checkpointId = checkpointId,
 			now = startedAt
 		)
 		if (insertedRows == 0) {
 			throw ConflictException("error.shift.already-open")
 		}
 
-		return WorkShiftDto(id = id, inspectorId = principal.accountId, startedAt = startedAt, endedAt = null)
+		return WorkShiftDto(
+			id = id,
+			inspectorId = principal.accountId,
+			startedAt = startedAt,
+			endedAt = null,
+			checkpointId = checkpointId
+		)
 	}
 
 	/**
@@ -91,6 +111,17 @@ class WorkShiftService(
 			.map { it.inspectorId }
 			.toSet()
 	}
+
+	/**
+	 * Every currently-open shift checked into [checkpointId] right now — backs
+	 * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getOnDuty] (mobile
+	 * "Nazorat punkti" screen's "Navbatchi inspektorlar" roster). Returns the lightweight
+	 * [CheckpointOpenShiftDto] projection, not the [WorkShift] entity — see that class kdoc for why
+	 * this stays the only place in the codebase that touches [WorkShiftRepository] directly.
+	 */
+	fun openShiftsForCheckpoint(checkpointId: UUID): List<CheckpointOpenShiftDto> =
+		workShiftRepository.findByCheckpointIdAndEndedAtIsNull(checkpointId)
+			.map { CheckpointOpenShiftDto(inspectorId = it.inspectorId, startedAt = it.startedAt) }
 
 	/** Defense-in-depth mirror of the controller's `@PreAuthorize` — same pattern used throughout this codebase. */
 	private fun assertInspector(role: RoleType) {

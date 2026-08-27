@@ -65,6 +65,36 @@ class Inspection(
 
 	/** The SUPER_ADMIN/ADMIN/OPERATOR account that created/assigned this inspection. */
 	@Column(name = "created_by")
-	var createdBy: UUID? = null
+	var createdBy: UUID? = null,
+
+	/**
+	 * "Elektron" inspector signature per design's `TO-Screen.dc.html` `reportDetail` ("TASDIQ VA
+	 * IMZOLAR" -> "Inspektor imzosi ... Elektron · <vaqt>"). NOT a cryptographic/PKI signature —
+	 * there is no keypair, no signed hash, nothing verifiable offline. It is simply the
+	 * server-recorded timestamp of "the authenticated inspector confirmed this inspection's
+	 * completion at this moment", auto-set by
+	 * [uz.safecity.transportobserver.inspections.service.InspectionService]#updateStatus the moment
+	 * the inspection transitions to [InspectionStatus.COMPLETED]. Do not present this field to
+	 * users or auditors as providing non-repudiation guarantees stronger than "this account's
+	 * session did this, at this time" — the same guarantee any other audited write in this system
+	 * already has.
+	 */
+	@Column(name = "inspector_signed_at")
+	var inspectorSignedAt: Instant? = null,
+
+	/**
+	 * "Elektron" driver signature — same non-cryptographic "timestamp confirmation" meaning as
+	 * [inspectorSignedAt] (see its kdoc), but for the driver being inspected. The driver has no
+	 * account/session in this system, so there is nothing to authenticate here beyond the
+	 * inspector's own device recording "the driver confirmed in person at this moment" — set only
+	 * when the completion request explicitly asks for it
+	 * ([uz.safecity.transportobserver.inspections.dto.UpdateInspectionStatusRequest.driverConfirmed]).
+	 */
+	@Column(name = "driver_signed_at")
+	var driverSignedAt: Instant? = null,
+
+	/** Optional witness name per design's "TASDIQ VA IMZOLAR" -> "Guvoh (ixtiyoriy)" — plain text, no signature/timestamp of its own. */
+	@Column(name = "witness_name")
+	var witnessName: String? = null
 
 ) : BaseEntity()
