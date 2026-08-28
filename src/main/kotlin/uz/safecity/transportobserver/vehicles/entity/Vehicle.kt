@@ -13,6 +13,9 @@ enum class VehicleType { CAR, BUS, TRUCK, MOTORCYCLE, SPECIAL, OTHER }
 /** Owner category — "jismoniy shaxs" (individual) vs "yuridik shaxs" (legal entity), as surfaced on the frontend's add-vehicle form. */
 enum class VehicleOwnerType { INDIVIDUAL, LEGAL_ENTITY }
 
+/** Risk level — "Past/O'rta/Yuqori" chip-select on the frontend's add/edit-vehicle form and registry list filter. */
+enum class VehicleRiskLevel { LOW, MEDIUM, HIGH }
+
 /**
  * Master registry row for a transport vehicle (TZ section 6, "Nazorat/transport"
  * group — `GET/POST /checkpoints, /vehicles`). Same shape/pattern as
@@ -75,6 +78,11 @@ class Vehicle(
 	/** Employee.id — organizational assignment only, see class kdoc. */
 	@Column(name = "assigned_employee_id")
 	var assignedEmployeeId: UUID? = null,
+
+	/** Xavf darajasi — mockup'dagi "Past/O'rta/Yuqori" chip-tanlov. Nullable — eski qatorlar uchun default aniqlanmagan, admin qo'lda belgilaydi (xuddi ownerType kabi). */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "risk_level", length = 32)
+	var riskLevel: VehicleRiskLevel? = null,
 
 	@Column(name = "is_active", nullable = false)
 	var isActive: Boolean = true

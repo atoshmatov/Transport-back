@@ -3,6 +3,7 @@ package uz.safecity.transportobserver.vehicles.controller
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.vehicles.dto.VehicleDto
+import uz.safecity.transportobserver.vehicles.entity.VehicleRiskLevel
 import uz.safecity.transportobserver.vehicles.entity.VehicleType
 import uz.safecity.transportobserver.vehicles.service.VehicleService
 import org.springframework.data.domain.Pageable
@@ -47,9 +48,10 @@ class VehicleController(
 		@RequestParam(required = false) isActive: Boolean?,
 		@RequestParam(required = false) regionName: String?,
 		@RequestParam(required = false) assignedEmployeeId: UUID?,
+		@RequestParam(required = false) riskLevel: VehicleRiskLevel?,
 		@PageableDefault(size = 20) pageable: Pageable
 	): ResponseEntity<ApiResponse<PageResponse<VehicleDto>>> =
-		ResponseEntity.ok(ApiResponse.ok(vehicleService.list(type, isActive, regionName, assignedEmployeeId, pageable)))
+		ResponseEntity.ok(ApiResponse.ok(vehicleService.list(type, isActive, regionName, assignedEmployeeId, riskLevel, pageable)))
 
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
 	@GetMapping("/{id}")

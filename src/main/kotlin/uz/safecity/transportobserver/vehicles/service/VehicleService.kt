@@ -11,6 +11,7 @@ import uz.safecity.transportobserver.vehicles.dto.UpdateVehicleRequest
 import uz.safecity.transportobserver.vehicles.dto.VehicleDto
 import uz.safecity.transportobserver.vehicles.dto.VehiclePickerDto
 import uz.safecity.transportobserver.vehicles.entity.Vehicle
+import uz.safecity.transportobserver.vehicles.entity.VehicleRiskLevel
 import uz.safecity.transportobserver.vehicles.entity.VehicleType
 import uz.safecity.transportobserver.vehicles.repository.VehicleRepository
 import jakarta.persistence.criteria.Predicate
@@ -31,10 +32,11 @@ class VehicleService(
 		isActive: Boolean?,
 		regionName: String?,
 		assignedEmployeeId: UUID?,
+		riskLevel: VehicleRiskLevel?,
 		pageable: Pageable
 	): PageResponse<VehicleDto> {
 		val page = vehicleRepository.findAll(
-			buildSpecification(type, isActive, regionName, assignedEmployeeId),
+			buildSpecification(type, isActive, regionName, assignedEmployeeId, riskLevel),
 			pageable
 		)
 		return PageResponse(
@@ -84,7 +86,8 @@ class VehicleService(
 			model = request.model,
 			regionName = request.regionName,
 			ownerType = request.ownerType,
-			assignedEmployeeId = request.assignedEmployeeId
+			assignedEmployeeId = request.assignedEmployeeId,
+			riskLevel = request.riskLevel
 		)
 		return VehicleDto.from(vehicleRepository.save(vehicle))
 	}
@@ -102,6 +105,7 @@ class VehicleService(
 		vehicle.regionName = request.regionName
 		vehicle.ownerType = request.ownerType
 		vehicle.assignedEmployeeId = request.assignedEmployeeId
+		vehicle.riskLevel = request.riskLevel
 		return VehicleDto.from(vehicleRepository.save(vehicle))
 	}
 
@@ -142,7 +146,8 @@ class VehicleService(
 		type: VehicleType?,
 		isActive: Boolean?,
 		regionName: String?,
-		assignedEmployeeId: UUID?
+		assignedEmployeeId: UUID?,
+		riskLevel: VehicleRiskLevel?
 	): Specification<Vehicle> =
 		Specification { root, _, cb ->
 			val predicates = mutableListOf<Predicate>()
@@ -150,6 +155,7 @@ class VehicleService(
 			isActive?.let { predicates.add(cb.equal(root.get<Boolean>("isActive"), it)) }
 			regionName?.let { predicates.add(cb.equal(root.get<String>("regionName"), it)) }
 			assignedEmployeeId?.let { predicates.add(cb.equal(root.get<UUID>("assignedEmployeeId"), it)) }
+			riskLevel?.let { predicates.add(cb.equal(root.get<VehicleRiskLevel>("riskLevel"), it)) }
 			cb.and(*predicates.toTypedArray())
 		}
 
