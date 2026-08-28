@@ -5,6 +5,7 @@ import uz.safecity.transportobserver.common.exception.ConflictException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.storage.FileStorageService
 import uz.safecity.transportobserver.reports.dto.CreateReportRequest
+import uz.safecity.transportobserver.reports.dto.ReportDto
 import uz.safecity.transportobserver.reports.dto.ReportGenerationMessage
 import uz.safecity.transportobserver.reports.entity.Report
 import uz.safecity.transportobserver.reports.entity.ReportStatus
@@ -30,9 +31,13 @@ class ReportService(
 	private val fileStorageService: FileStorageService
 ) {
 
-	fun list(): List<Report> = reportRepository.findAll()
+	/** `GET /api/v1/reports` — see [ReportDto] kdoc for why this is a projection rather than the raw [Report] entity. */
+	fun list(): List<ReportDto> = reportRepository.findAll().map { ReportDto.from(it) }
 
-	fun getById(id: UUID): Report =
+	/** `GET /api/v1/reports/{id}` — see [ReportDto] kdoc for why this is a projection rather than the raw [Report] entity. */
+	fun getById(id: UUID): ReportDto = ReportDto.from(findOrThrow(id))
+
+	private fun findOrThrow(id: UUID): Report =
 		reportRepository.findById(id).orElseThrow { ResourceNotFoundException("error.report.not-found", id) }
 
 	/**
@@ -71,7 +76,7 @@ class ReportService(
 	 * instead of implying the id is wrong.
 	 */
 	fun getDownloadUrl(id: UUID): String {
-		val report = getById(id)
+		val report = findOrThrow(id)
 		val fileUrl = report.fileUrl
 		if (report.status != ReportStatus.READY || fileUrl == null) {
 			throw ConflictException("error.report.not-ready", report.status)

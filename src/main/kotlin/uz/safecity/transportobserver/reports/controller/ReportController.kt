@@ -4,6 +4,7 @@ import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.reports.dto.CreateReportRequest
 import uz.safecity.transportobserver.reports.dto.ReportDownloadDto
+import uz.safecity.transportobserver.reports.dto.ReportDto
 import uz.safecity.transportobserver.reports.entity.Report
 import uz.safecity.transportobserver.reports.service.ReportService
 import jakarta.validation.Valid
@@ -24,10 +25,13 @@ import java.util.UUID
  * (pre-existing, plain CRUD-read) plus the async export pipeline added on top —
  * `POST /reports` (queues a PDF build, see [ReportService.create]) and
  * `GET /reports/{id}/download` (mints a signed MinIO URL once ready, see
- * [ReportService.getDownloadUrl]). SUPER_ADMIN/ADMIN/OPERATOR only on the two write/export-facing
- * endpoints, matching [uz.safecity.transportobserver.reports.controller.ReportStatsController]'s
- * role set for the same TZ section 7 API group — generating/downloading a report document is a
- * dispatch/management action, not something a field INSPECTOR does.
+ * [ReportService.getDownloadUrl]). SUPER_ADMIN/ADMIN/OPERATOR only on all four endpoints, matching
+ * [uz.safecity.transportobserver.reports.controller.ReportStatsController]'s `dashboard` role set
+ * for the same TZ section 7 API group — a generated report document (who requested it, its
+ * period/type, its file) is dispatch/management data, not something a field INSPECTOR should be
+ * able to list or read. `list`/`getById` return [uz.safecity.transportobserver.reports.dto.ReportDto]
+ * rather than the raw [Report] entity — see that DTO's kdoc for exactly which entity fields are
+ * deliberately left off the wire.
  */
 @RestController
 @RequestMapping("/api/v1/reports")
@@ -35,12 +39,14 @@ class ReportController(
 	private val reportService: ReportService
 ) {
 
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
 	@GetMapping
-	fun list(): ResponseEntity<ApiResponse<List<Report>>> =
+	fun list(): ResponseEntity<ApiResponse<List<ReportDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(reportService.list()))
 
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
 	@GetMapping("/{id}")
-	fun getById(@PathVariable id: UUID): ResponseEntity<ApiResponse<Report>> =
+	fun getById(@PathVariable id: UUID): ResponseEntity<ApiResponse<ReportDto>> =
 		ResponseEntity.ok(ApiResponse.ok(reportService.getById(id)))
 
 	/**
