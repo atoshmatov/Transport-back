@@ -60,18 +60,21 @@ class IncidentController(
 	// see IncidentService kdoc for the scoping rule itself). [assignedInspectorId]
 	// is only meaningful for SUPER_ADMIN/ADMIN/OPERATOR callers — see
 	// IncidentService#list kdoc for why an INSPECTOR caller can't use it to widen
-	// their own view.
+	// their own view. [isSos] backs the web "Favqulodda navbat" (Emergency) screen —
+	// server-side filter instead of the previous client-side filtering over the last
+	// 100 incidents, which could miss older still-open SOS reports.
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping
 	fun list(
 		@RequestParam(required = false) status: IncidentStatus?,
 		@RequestParam(required = false) type: IncidentType?,
 		@RequestParam(required = false) assignedInspectorId: UUID?,
+		@RequestParam(required = false) isSos: Boolean?,
 		@PageableDefault(size = 20) pageable: Pageable,
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<PageResponse<IncidentDto>>> =
 		ResponseEntity.ok(
-			ApiResponse.ok(incidentService.list(status, type, assignedInspectorId, principal, pageable))
+			ApiResponse.ok(incidentService.list(status, type, assignedInspectorId, isSos, principal, pageable))
 		)
 
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")

@@ -69,22 +69,29 @@ class IncidentService(
 ) {
 
 	/**
-	 * Admin/operator board (TZ section 7): filter by [status]/[type]/[assignedInspectorId] with
-	 * pagination. [assignedInspectorId] is only meaningful for SUPER_ADMIN/ADMIN/OPERATOR callers —
-	 * for an INSPECTOR principal it is ignored and the INSPECTOR-scoping predicate from
+	 * Admin/operator board (TZ section 7): filter by [status]/[type]/[assignedInspectorId]/[isSos]
+	 * with pagination. [assignedInspectorId] is only meaningful for SUPER_ADMIN/ADMIN/OPERATOR
+	 * callers — for an INSPECTOR principal it is ignored and the INSPECTOR-scoping predicate from
 	 * [buildSpecification] wins instead, so an inspector can never widen their own view by
 	 * passing (or omitting) that param. See [buildSpecification] kdoc for why scoping lives in the
 	 * same Specification as the filters rather than being applied afterwards.
+	 *
+	 * [isSos] backs the web "Favqulodda navbat" (Emergency) board — `isSos=true` returns only
+	 * panic-button reports (see [Incident.isSos] kdoc), replacing the previous client-side
+	 * filtering over the last 100 incidents (which could silently miss an older still-open SOS
+	 * once report volume grew past that page). `null` (the default, omitted param) preserves the
+	 * pre-existing unfiltered behavior — backward compatible with every caller that doesn't send it.
 	 */
 	fun list(
 		status: IncidentStatus?,
 		type: IncidentType?,
 		assignedInspectorId: UUID?,
+		isSos: Boolean?,
 		principal: CustomUserDetails,
 		pageable: Pageable
 	): PageResponse<IncidentDto> {
 		val page = incidentRepository.findAll(
-			buildSpecification(status, type, assignedInspectorId, principal),
+			buildSpecification(status, type, assignedInspectorId, isSos, principal),
 			pageable
 		)
 		// Batched evidence-count lookup (one grouped query for the whole page) instead of one
@@ -695,12 +702,14 @@ class IncidentService(
 		status: IncidentStatus?,
 		type: IncidentType?,
 		assignedInspectorId: UUID?,
+		isSos: Boolean?,
 		principal: CustomUserDetails
 	): Specification<Incident> =
 		Specification { root, _, cb ->
 			val predicates = mutableListOf<Predicate>()
 			status?.let { predicates.add(cb.equal(root.get<IncidentStatus>("status"), it)) }
 			type?.let { predicates.add(cb.equal(root.get<IncidentType>("type"), it)) }
+			isSos?.let { predicates.add(cb.equal(root.get<Boolean>("isSos"), it)) }
 
 			if (principal.role == RoleType.INSPECTOR) {
 				predicates.add(cb.equal(root.get<UUID>("assignedInspectorId"), principal.accountId))
