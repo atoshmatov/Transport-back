@@ -6,6 +6,7 @@ import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeRequest
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeResponse
 import uz.safecity.transportobserver.employees.dto.EmployeeDto
+import uz.safecity.transportobserver.employees.dto.EmployeePositionHistoryDto
 import uz.safecity.transportobserver.employees.dto.UpdateEmployeeRequest
 import uz.safecity.transportobserver.employees.dto.UpdateEmployeeStatusRequest
 import uz.safecity.transportobserver.employees.service.EmployeeService
@@ -15,6 +16,7 @@ import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -90,4 +92,10 @@ class AdminEmployeeController(
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<EmployeeDto>> =
 		ResponseEntity.ok(ApiResponse.ok(employeeService.uploadPhoto(id, file, principal.accountId, principal.role)))
+
+	/** Lavozim/hudud o'zgarish jurnali — see [uz.safecity.transportobserver.employees.entity.EmployeePositionHistory] kdoc. */
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN')")
+	@GetMapping("/{id}/position-history")
+	fun getPositionHistory(@PathVariable id: UUID): ResponseEntity<ApiResponse<List<EmployeePositionHistoryDto>>> =
+		ResponseEntity.ok(ApiResponse.ok(employeeService.getPositionHistory(id)))
 }

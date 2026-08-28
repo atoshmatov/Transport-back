@@ -17,11 +17,15 @@ enum class ActivityTone { ACCENT, INFO, NEUTRAL }
 /**
  * Response for `GET /api/v1/inspector/me/profile-detail` — the mobile "Xodim kartasi"
  * (`profileDetail`, `backTo: 'profile'`) full-profile screen. See
- * [uz.safecity.transportobserver.inspector.service.ProfileDetailService] kdoc for exactly which
- * design fields this deliberately leaves out (JSHSHIR, birth date, home address, email, service
- * certificate, driving category, attestation dates, assigned tablet/camera) and why: none of that
- * HR-master data exists anywhere in this codebase yet, and fabricating it would be worse than
- * omitting it. Every field below is backed by a real column or a real, already-existing service
+ * [uz.safecity.transportobserver.inspector.service.ProfileDetailService] kdoc.
+ *
+ * The design (`TO-Screen.dc.html` `profileDetail`, ~line 813) originally showed several fields
+ * ([personalId] through [assignedBadgeCameraId]) that had no backing column at all —
+ * [uz.safecity.transportobserver.employees.entity.Employee] has since gained them (see that
+ * entity's kdoc). They are still all nullable here: most existing employee rows have none of it
+ * entered yet, and there is (as of this addition) still no admin-panel form to enter it — that UI
+ * is a separate, later task. `null` means "not entered yet", never fabricated. Every other field
+ * below is backed by a real column or a real, already-existing service
  * ([uz.safecity.transportobserver.ratings.service.RatingService]) — nothing here is invented.
  */
 data class ProfileDetailDto(
@@ -38,7 +42,18 @@ data class ProfileDetailDto(
 	/** Same as [uz.safecity.transportobserver.ratings.dto.MyRatingDto.rank] — null when outside the top-20 leaderboard. */
 	val rank: Int?,
 	val assignedVehicle: VehicleSummaryDto?,
-	val recentActivity: List<ProfileActivityDto>
+	val recentActivity: List<ProfileActivityDto>,
+	// --- HR "full profile" fields — see class kdoc. All nullable: `null` = not entered yet. ---
+	val personalId: String?,
+	val birthDate: LocalDate?,
+	val homeAddress: String?,
+	val email: String?,
+	val serviceCertificateNumber: String?,
+	val serviceCertificateExpiresAt: LocalDate?,
+	val driverLicenseCategory: String?,
+	val lastCertificationAt: LocalDate?,
+	val assignedTabletId: String?,
+	val assignedBadgeCameraId: String?
 ) {
 	companion object {
 		fun from(
@@ -59,7 +74,17 @@ data class ProfileDetailDto(
 			completedInspectionsCount = completedInspectionsCount,
 			rank = rank,
 			assignedVehicle = assignedVehicle,
-			recentActivity = recentActivity
+			recentActivity = recentActivity,
+			personalId = employee.personalId,
+			birthDate = employee.birthDate,
+			homeAddress = employee.homeAddress,
+			email = employee.email,
+			serviceCertificateNumber = employee.serviceCertificateNumber,
+			serviceCertificateExpiresAt = employee.serviceCertificateExpiresAt,
+			driverLicenseCategory = employee.driverLicenseCategory,
+			lastCertificationAt = employee.lastCertificationAt,
+			assignedTabletId = employee.assignedTabletId,
+			assignedBadgeCameraId = employee.assignedBadgeCameraId
 		)
 	}
 }

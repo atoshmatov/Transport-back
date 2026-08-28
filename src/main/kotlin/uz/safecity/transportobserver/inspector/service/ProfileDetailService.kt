@@ -22,15 +22,16 @@ import org.springframework.stereotype.Service
  * Backs `GET /api/v1/inspector/me/profile-detail` — the mobile "Xodim kartasi" (`profileDetail`,
  * opened from the Profile tab, `backTo: 'profile'`) full-profile screen.
  *
- * The design (`TO-Screen.dc.html` `profileDetail`, ~line 813) shows a LOT more than this: JSHSHIR,
- * birth date, home address, email, service-certificate number/expiry, driving license category,
- * attestation dates, assigned tablet/body camera. NONE of that exists anywhere in this codebase
- * ([uz.safecity.transportobserver.employees.entity.Employee] has no such columns, and there is no
- * admin-panel form to enter it) — inventing plausible-looking values for those fields would be
- * worse than simply not showing them, so this DTO deliberately covers ONLY what a real column or a
- * real, already-existing service can answer:
- *  - [uz.safecity.transportobserver.employees.entity.Employee]'s existing columns (name, position,
- *    department, region, phone, hire date, photo key),
+ * The design (`TO-Screen.dc.html` `profileDetail`, ~line 813) shows a LOT more than the original
+ * columns covered: JSHSHIR, birth date, home address, email, service-certificate number/expiry,
+ * driving license category, attestation dates, assigned tablet/body camera.
+ * [uz.safecity.transportobserver.employees.entity.Employee] now has real columns for all of these
+ * (see that entity's kdoc) — there is still no admin-panel form to enter them yet (a later, separate
+ * task), so most existing rows will simply have `null` there until that form lands. `null` here
+ * always means "not entered yet", never a fabricated/guessed value. This DTO covers ONLY what a
+ * real column or a real, already-existing service can answer:
+ *  - [uz.safecity.transportobserver.employees.entity.Employee]'s columns (name, position,
+ *    department, region, phone, hire date, photo key, and the HR fields above),
  *  - the leaderboard rank/completed-count metric, reusing [RatingService.getMyRating] rather than
  *    re-deriving it (this codebase already fixed a fabricated "4.8 rating" bug once — see that
  *    method's kdoc — this must not reintroduce a second fabricated number next to it),

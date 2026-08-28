@@ -4,7 +4,9 @@ import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.common.util.PresenceUtils
 import uz.safecity.transportobserver.employees.entity.Employee
+import uz.safecity.transportobserver.employees.entity.EmployeePositionHistory
 import uz.safecity.transportobserver.employees.entity.EmployeeStatus
+import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
@@ -56,7 +58,18 @@ data class EmployeeDto(
 	 * there is no "no signal to speak of" case: an employee either currently has an open shift or
 	 * they don't.
 	 */
-	val onDuty: Boolean
+	val onDuty: Boolean,
+	// --- HR "full profile" fields — see Employee kdoc. All nullable: `null` = not entered yet. ---
+	val personalId: String?,
+	val birthDate: LocalDate?,
+	val homeAddress: String?,
+	val email: String?,
+	val serviceCertificateNumber: String?,
+	val serviceCertificateExpiresAt: LocalDate?,
+	val driverLicenseCategory: String?,
+	val lastCertificationAt: LocalDate?,
+	val assignedTabletId: String?,
+	val assignedBadgeCameraId: String?
 ) {
 	companion object {
 		fun from(employee: Employee, account: Account?, photoUrl: String? = null, onDuty: Boolean = false) = EmployeeDto(
@@ -76,7 +89,17 @@ data class EmployeeDto(
 			photoUrl = photoUrl,
 			online = account?.let { PresenceUtils.isRecent(it.lastActiveAt) },
 			lastActiveAt = account?.lastActiveAt,
-			onDuty = onDuty
+			onDuty = onDuty,
+			personalId = employee.personalId,
+			birthDate = employee.birthDate,
+			homeAddress = employee.homeAddress,
+			email = employee.email,
+			serviceCertificateNumber = employee.serviceCertificateNumber,
+			serviceCertificateExpiresAt = employee.serviceCertificateExpiresAt,
+			driverLicenseCategory = employee.driverLicenseCategory,
+			lastCertificationAt = employee.lastCertificationAt,
+			assignedTabletId = employee.assignedTabletId,
+			assignedBadgeCameraId = employee.assignedBadgeCameraId
 		)
 	}
 }
@@ -99,7 +122,26 @@ data class CreateEmployeeRequest(
 	val role: RoleType? = null,
 
 	/** Optional — if blank/omitted, a username is auto-generated from [fullName]. */
-	val username: String? = null
+	val username: String? = null,
+
+	// --- HR "full profile" fields — all optional, see Employee kdoc. ---
+	@field:Size(max = 32, message = "JSHSHIR/pasport 32 belgidan oshmasligi kerak")
+	val personalId: String? = null,
+	val birthDate: LocalDate? = null,
+	val homeAddress: String? = null,
+	@field:Email(message = "email formati noto'g'ri")
+	@field:Size(max = 150, message = "email 150 belgidan oshmasligi kerak")
+	val email: String? = null,
+	@field:Size(max = 64, message = "guvohnoma raqami 64 belgidan oshmasligi kerak")
+	val serviceCertificateNumber: String? = null,
+	val serviceCertificateExpiresAt: LocalDate? = null,
+	@field:Size(max = 32, message = "toifa 32 belgidan oshmasligi kerak")
+	val driverLicenseCategory: String? = null,
+	val lastCertificationAt: LocalDate? = null,
+	@field:Size(max = 64, message = "planshet identifikatori 64 belgidan oshmasligi kerak")
+	val assignedTabletId: String? = null,
+	@field:Size(max = 64, message = "badge-camera identifikatori 64 belgidan oshmasligi kerak")
+	val assignedBadgeCameraId: String? = null
 )
 
 /**
@@ -122,10 +164,51 @@ data class UpdateEmployeeRequest(
 	val department: String? = null,
 	val regionName: String? = null,
 	val phoneNumber: String? = null,
-	val hiredAt: LocalDate? = null
+	val hiredAt: LocalDate? = null,
+
+	// --- HR "full profile" fields — all optional, see Employee/CreateEmployeeRequest kdoc. ---
+	@field:Size(max = 32, message = "JSHSHIR/pasport 32 belgidan oshmasligi kerak")
+	val personalId: String? = null,
+	val birthDate: LocalDate? = null,
+	val homeAddress: String? = null,
+	@field:Email(message = "email formati noto'g'ri")
+	@field:Size(max = 150, message = "email 150 belgidan oshmasligi kerak")
+	val email: String? = null,
+	@field:Size(max = 64, message = "guvohnoma raqami 64 belgidan oshmasligi kerak")
+	val serviceCertificateNumber: String? = null,
+	val serviceCertificateExpiresAt: LocalDate? = null,
+	@field:Size(max = 32, message = "toifa 32 belgidan oshmasligi kerak")
+	val driverLicenseCategory: String? = null,
+	val lastCertificationAt: LocalDate? = null,
+	@field:Size(max = 64, message = "planshet identifikatori 64 belgidan oshmasligi kerak")
+	val assignedTabletId: String? = null,
+	@field:Size(max = 64, message = "badge-camera identifikatori 64 belgidan oshmasligi kerak")
+	val assignedBadgeCameraId: String? = null
 )
 
 data class UpdateEmployeeStatusRequest(
 	@field:NotNull(message = "isActive majburiy")
 	val isActive: Boolean? = null
 )
+
+/** `GET /api/v1/admin/employees/{id}/position-history` row — see [EmployeePositionHistory] kdoc. */
+data class EmployeePositionHistoryDto(
+	val id: UUID,
+	val employeeId: UUID,
+	val position: String,
+	val regionName: String?,
+	val startedAt: Instant,
+	/** `null` = this is the employee's current spell. */
+	val endedAt: Instant?
+) {
+	companion object {
+		fun from(entity: EmployeePositionHistory) = EmployeePositionHistoryDto(
+			id = requireNotNull(entity.id),
+			employeeId = entity.employeeId,
+			position = entity.position,
+			regionName = entity.regionName,
+			startedAt = entity.startedAt,
+			endedAt = entity.endedAt
+		)
+	}
+}

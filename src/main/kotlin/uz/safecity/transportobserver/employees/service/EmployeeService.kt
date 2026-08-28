@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeRequest
 import uz.safecity.transportobserver.employees.dto.CreateEmployeeResponse
 import uz.safecity.transportobserver.employees.dto.EmployeeDto
+import uz.safecity.transportobserver.employees.dto.EmployeePositionHistoryDto
 import uz.safecity.transportobserver.employees.dto.UpdateEmployeeRequest
 import uz.safecity.transportobserver.employees.entity.Employee
 import uz.safecity.transportobserver.employees.entity.EmployeeStatus
@@ -39,7 +40,8 @@ class EmployeeService(
 	private val authService: AuthService,
 	private val auditService: AuditService,
 	private val fileStorageService: FileStorageService,
-	private val workShiftService: WorkShiftService
+	private val workShiftService: WorkShiftService,
+	private val employeePositionHistoryService: EmployeePositionHistoryService
 ) {
 
 	fun list(
@@ -107,9 +109,22 @@ class EmployeeService(
 				department = request.department,
 				regionName = request.regionName,
 				phoneNumber = request.phoneNumber,
-				hiredAt = request.hiredAt
+				hiredAt = request.hiredAt,
+				personalId = request.personalId,
+				birthDate = request.birthDate,
+				homeAddress = request.homeAddress,
+				email = request.email,
+				serviceCertificateNumber = request.serviceCertificateNumber,
+				serviceCertificateExpiresAt = request.serviceCertificateExpiresAt,
+				driverLicenseCategory = request.driverLicenseCategory,
+				lastCertificationAt = request.lastCertificationAt,
+				assignedTabletId = request.assignedTabletId,
+				assignedBadgeCameraId = request.assignedBadgeCameraId
 			)
 		)
+		// Seeds the employee's first/current position-history spell (no-op close step, since a
+		// brand-new employee has no prior open row) — see EmployeePositionHistoryService kdoc.
+		employeePositionHistoryService.recordChange(requireNotNull(employee.id), request.position, request.regionName)
 
 		val temporaryPassword = temporaryPasswordGenerator.generate()
 		val account = accountRepository.save(
@@ -144,6 +159,11 @@ class EmployeeService(
 	 * SUPER_ADMIN's or another ADMIN's core profile fields just because no role/status is being
 	 * touched here. If the employee has no linked [Account] (legacy row — see [Employee] kdoc),
 	 * there is no role to gate on, so the check is skipped and the update proceeds.
+	 *
+	 * Whenever `position` or `regionName` actually changes, this also closes the employee's
+	 * current [uz.safecity.transportobserver.employees.entity.EmployeePositionHistory] spell and
+	 * opens a new one via [EmployeePositionHistoryService.recordChange] — see that method's kdoc.
+	 * The comparison happens BEFORE the fields below are overwritten, since [Employee] is mutable.
 	 */
 	@Transactional
 	fun update(id: UUID, request: UpdateEmployeeRequest, actorAccountId: UUID?, actorRole: RoleType): EmployeeDto {
@@ -151,17 +171,39 @@ class EmployeeService(
 		val account = accountRepository.findByEmployeeId(id).orElse(null)
 		account?.let { RoleHierarchyGuard.assertCanManage(actorRole, it.role) }
 
+		val positionOrRegionChanged = employee.position != request.position || employee.regionName != request.regionName
+
 		employee.fullName = request.fullName
 		employee.position = request.position
 		employee.department = request.department
 		employee.regionName = request.regionName
 		employee.phoneNumber = request.phoneNumber
 		employee.hiredAt = request.hiredAt
+		employee.personalId = request.personalId
+		employee.birthDate = request.birthDate
+		employee.homeAddress = request.homeAddress
+		employee.email = request.email
+		employee.serviceCertificateNumber = request.serviceCertificateNumber
+		employee.serviceCertificateExpiresAt = request.serviceCertificateExpiresAt
+		employee.driverLicenseCategory = request.driverLicenseCategory
+		employee.lastCertificationAt = request.lastCertificationAt
+		employee.assignedTabletId = request.assignedTabletId
+		employee.assignedBadgeCameraId = request.assignedBadgeCameraId
 		val saved = employeeRepository.save(employee)
+
+		if (positionOrRegionChanged) {
+			employeePositionHistoryService.recordChange(id, request.position, request.regionName)
+		}
 
 		auditService.record(actorAccountId, "EMPLOYEE_UPDATED", "Employee", id)
 
 		return EmployeeDto.from(saved, account, getPhotoUrl(saved.photoKey))
+	}
+
+	/** `GET /api/v1/admin/employees/{id}/position-history` — newest spell first. */
+	fun getPositionHistory(id: UUID): List<EmployeePositionHistoryDto> {
+		findEmployeeOrThrow(id)
+		return employeePositionHistoryService.list(id)
 	}
 
 	/** Block/activate = flips Account.isActive. Blocking immediately revokes every live session (TASK-566 pattern). */
