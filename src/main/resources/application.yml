@@ -3,6 +3,25 @@ spring:
     name: transport-observer-backend
   profiles:
     active: dev
+  rabbitmq:
+    listener:
+      simple:
+        retry:
+          # Bounded redelivery for transient failures (see ReportGenerationService.generate kdoc /
+          # RabbitMQConfig.QUEUE_REPORT_GENERATION_DLQ) — without this, Spring AMQP's default
+          # behaviour on a rejected/uncaught-exception delivery is to requeue and redeliver
+          # immediately forever, which turns any still-ongoing transient error (or a genuinely
+          # malformed/poison message) into an unbounded, CPU-spinning loop.
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000
+          multiplier: 2.0
+          max-interval: 10000
+        # After `max-attempts` retries are exhausted, Spring's retry interceptor throws
+        # AmqpRejectAndDontRequeueException so the broker dead-letters the message (per queue's
+        # x-dead-letter-exchange, see RabbitMQConfig) instead of requeuing it — this flag makes
+        # any other rejection path (outside the retry interceptor) behave the same way.
+        default-requeue-rejected: false
   jackson:
     default-property-inclusion: non_null
     serialization:

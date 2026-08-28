@@ -93,4 +93,7 @@ interface WorkShiftRepository : JpaRepository<WorkShift, UUID> {
 	 * events.
 	 */
 	fun findTop5ByInspectorIdOrderByStartedAtDesc(inspectorId: UUID): List<WorkShift>
+
+	/** `POST /reports` EMPLOYEE_ACTIVITY generation (ReportGenerationService) — shift check-ins started within the report's period. */
+	fun countByStartedAtBetween(start: Instant, end: Instant): Long
 }

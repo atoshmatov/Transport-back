@@ -13,8 +13,11 @@ enum class ReportStatus { PENDING, GENERATING, READY, FAILED }
 enum class ReportType { INCIDENTS_SUMMARY, EMPLOYEE_ACTIVITY, RAILSAFE_EVENTS, CUSTOM }
 
 /**
- * Placeholder — real generation pipeline (async job -> MinIO file -> URL)
- * will be added per TZ section 7 (reports API group).
+ * Async PDF-export pipeline (TZ section 7 reports API group): `POST /reports` saves this row as
+ * PENDING and publishes a `report.generated` RabbitMQ message carrying its id; `ReportGenerationListener`
+ * consumes it, flips to GENERATING, renders an HTML->PDF via openhtmltopdf, uploads to MinIO, and
+ * flips to READY (with [fileUrl] set) or FAILED (with [errorMessage] set) — see
+ * [uz.safecity.transportobserver.reports.service.ReportGenerationService] kdoc for the full flow.
  */
 @Entity
 @Table(name = "reports")
@@ -42,6 +45,10 @@ class Report(
 
 	/** MinIO object URL/key once status = READY. */
 	@Column(name = "file_url")
-	var fileUrl: String? = null
+	var fileUrl: String? = null,
+
+	/** Failure reason (exception message) when [status] = FAILED — see ReportGenerationService#generate. Null otherwise. */
+	@Column(name = "error_message", columnDefinition = "text")
+	var errorMessage: String? = null
 
 ) : BaseEntity()

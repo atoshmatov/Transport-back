@@ -56,6 +56,9 @@ dependencies {
     // --- Object storage (MinIO / S3-compatible) ---
     implementation("io.minio:minio:8.5.11")
 
+    // --- PDF generation (report export pipeline: HTML template -> PDF, see ReportGenerationService) ---
+    implementation("com.openhtmltopdf:openhtmltopdf-pdfbox:1.0.10")
+
     // --- Swagger ---
     implementation("org.springdoc:springdoc-openapi-ui:1.8.0")
     implementation("org.springdoc:springdoc-openapi-kotlin:1.8.0")
