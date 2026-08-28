@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.inspections.repository
 
 import uz.safecity.transportobserver.common.dto.DailyCountProjection
+import uz.safecity.transportobserver.common.dto.MonthlyCountProjection
 import uz.safecity.transportobserver.inspections.entity.Inspection
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import org.springframework.data.jpa.repository.JpaRepository
@@ -61,6 +62,9 @@ interface InspectionRepository : JpaRepository<Inspection, UUID>, JpaSpecificati
 	/** Reports dashboard `todayInspectionsCount` (ReportService) — system-wide, not scoped to one inspector. */
 	fun countByStatusAndPerformedAtBetween(status: InspectionStatus, start: Instant, end: Instant): Long
 
+	/** `POST /reports` EMPLOYEE_ACTIVITY generation (ReportGenerationService) — total inspection tasks created within the report's period, any status. */
+	fun countByCreatedAtBetween(start: Instant, end: Instant): Long
+
 	/**
 	 * Checkpoint-detail screen's "bugungi holat" (today) / "Tekshiruv/oy" (this month) counters —
 	 * see [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getTodayStats] /
@@ -104,6 +108,26 @@ interface InspectionRepository : JpaRepository<Inspection, UUID>, JpaSpecificati
 		nativeQuery = true
 	)
 	fun countDailyCreatedBetween(@Param("start") start: Instant, @Param("end") end: Instant): List<DailyCountProjection>
+
+	/**
+	 * Reports `activity` widget's `range=1y` window (ReportStatsService) — sibling of
+	 * [countDailyCreatedBetween], but bucketed by calendar MONTH (`date_trunc('month', ...)`)
+	 * instead of by day: a 365-daily-point series would be far more than the "Yillik" chart needs,
+	 * so this groups at month granularity in the same `Asia/Tashkent` zone every other "day
+	 * window" calculation in this codebase uses. Same `createdAt`-not-`performedAt` reasoning as
+	 * [countDailyCreatedBetween].
+	 */
+	@Query(
+		value = """
+			select date_trunc('month', created_at at time zone 'Asia/Tashkent')::date as month, count(*) as cnt
+			from inspections
+			where created_at >= :start and created_at < :end
+			group by month
+			order by month
+		""",
+		nativeQuery = true
+	)
+	fun countMonthlyCreatedBetween(@Param("start") start: Instant, @Param("end") end: Instant): List<MonthlyCountProjection>
 
 	/**
 	 * Ratings leaderboard (RatingService#fullRanking) — COMPLETED inspection counts grouped by

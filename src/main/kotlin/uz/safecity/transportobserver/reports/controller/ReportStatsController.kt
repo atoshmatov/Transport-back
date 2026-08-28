@@ -40,6 +40,8 @@ class ReportStatsController(
 	fun dashboard(): ResponseEntity<ApiResponse<DashboardReportDto>> =
 		ResponseEntity.ok(ApiResponse.ok(reportStatsService.getDashboard()))
 
+	// range: "7d" (default) / "30d" -> one point per day; "1y" -> one point per calendar month.
+	// See ReportStatsService#getActivity kdoc.
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
 	@GetMapping("/activity")
 	fun activity(

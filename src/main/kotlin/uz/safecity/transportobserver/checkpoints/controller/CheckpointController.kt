@@ -2,6 +2,7 @@ package uz.safecity.transportobserver.checkpoints.controller
 
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointDto
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointMetricsDto
+import uz.safecity.transportobserver.checkpoints.dto.CheckpointNearbyDto
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointOnDutyInspectorDto
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointTodayStatsDto
 import uz.safecity.transportobserver.checkpoints.service.CheckpointService
@@ -58,6 +59,27 @@ class CheckpointController(
 		ResponseEntity.ok(ApiResponse.ok(checkpointService.getById(id)))
 
 	/**
+	 * Mobile "hodisa yaratish" (report incident) flow's nearest-checkpoint SUGGESTION list — see
+	 * [uz.safecity.transportobserver.incidents.entity.Incident.checkpointId] kdoc for the full
+	 * hybrid-approach reasoning: this is the GPS-proximity ranking the client pre-fills/pre-selects
+	 * with, but the field inspector must confirm or change it before `POST /incidents` is called —
+	 * this endpoint itself never saves anything. Declared as a literal `/nearby` segment (matched
+	 * ahead of the `/{id}` UUID path-variable route by Spring's path-pattern specificity, same
+	 * pattern as any `/me`-style literal-vs-variable split elsewhere in this codebase).
+	 *
+	 * Open to `ROLE_INSPECTOR` too — same reasoning as [getOnDuty]/[getTodayStats]/[getMetrics]:
+	 * this backs a screen every field inspector reaches directly, not an admin-only roster.
+	 */
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
+	@GetMapping("/nearby")
+	fun nearby(
+		@RequestParam latitude: Double,
+		@RequestParam longitude: Double,
+		@RequestParam(required = false, defaultValue = "5") limit: Int
+	): ResponseEntity<ApiResponse<List<CheckpointNearbyDto>>> =
+		ResponseEntity.ok(ApiResponse.ok(checkpointService.findNearby(latitude, longitude, limit)))
+
+	/**
 	 * Mobile "Nazorat punkti" screen's "Navbatchi inspektorlar" list — see
 	 * [CheckpointStatsService.getOnDuty] kdoc.
 	 *
@@ -76,7 +98,7 @@ class CheckpointController(
 
 	/**
 	 * Mobile "Nazorat punkti" screen's "BUGUNGI HOLAT" block — see
-	 * [CheckpointStatsService.getTodayStats] kdoc (incl. why two of its fields are always `null`).
+	 * [CheckpointStatsService.getTodayStats] kdoc (incl. why one of its fields is always `null`).
 	 * Also open to `ROLE_INSPECTOR` — see [getOnDuty] kdoc for why.
 	 */
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")

@@ -24,3 +24,15 @@ interface DailyCountProjection {
 	val day: LocalDate
 	val cnt: Long
 }
+
+/**
+ * Shared "count grouped by local calendar month" projection for the reports "activity" widget's
+ * `range=1y` window (TZ section 7 extension) — reused as-is by Inspection/Incident, same pattern
+ * as [DailyCountProjection]. [month] is the first day of the month, already computed in the
+ * `Asia/Tashkent` zone by the backing native query (`date_trunc('month', ...)`), not in UTC — see
+ * InspectionRepository/IncidentRepository's `countMonthlyCreatedBetween`.
+ */
+interface MonthlyCountProjection {
+	val month: LocalDate
+	val cnt: Long
+}

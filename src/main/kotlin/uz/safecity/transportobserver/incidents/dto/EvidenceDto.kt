@@ -37,3 +37,23 @@ data class EvidenceDto(
 		)
 	}
 }
+
+/**
+ * `POST /incidents/{id}/evidence` response when the caller uploads through the multi-photo
+ * `files` param (see [uz.safecity.transportobserver.incidents.controller.IncidentController.uploadEvidence]
+ * kdoc for why this is a SEPARATE response shape from the single-file `file` param's plain
+ * [EvidenceDto]). Deliberately a per-file PARTIAL-success result, not an all-or-nothing
+ * transaction — see [uz.safecity.transportobserver.incidents.service.EvidenceService.uploadBatch]
+ * kdoc: one bad photo (wrong format, too large) in a multi-photo batch must not discard the
+ * other, valid photos in the same request.
+ */
+data class EvidenceUploadResultDto(
+	val uploaded: List<EvidenceDto>,
+	val failed: List<EvidenceUploadFailureDto>
+)
+
+/** One rejected file within an [EvidenceUploadResultDto] — [message] is the same localized text a single-file upload would have gotten back as its error response. */
+data class EvidenceUploadFailureDto(
+	val fileName: String?,
+	val message: String?
+)

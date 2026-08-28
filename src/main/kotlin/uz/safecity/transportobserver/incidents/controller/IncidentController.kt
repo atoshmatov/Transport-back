@@ -3,6 +3,7 @@ package uz.safecity.transportobserver.incidents.controller
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
+import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.incidents.dto.AssignInspectorRequest
 import uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest
 import uz.safecity.transportobserver.incidents.dto.EvidenceDto
@@ -144,19 +145,41 @@ class IncidentController(
 	// assigned incident; SUPER_ADMIN/ADMIN/OPERATOR may attach to any. EvidenceService applies
 	// the same ownership scoping as IncidentService (404 on a foreign incident id — see its
 	// kdoc), plus MIME/size validation (TZ section 9).
+	//
+	// Two request shapes on the same endpoint, kept for backward compatibility:
+	//   - `file` (singular, required=false only so a request with neither param gets a clean
+	//     BadRequestException instead of Spring's own missing-parameter error) — the ORIGINAL
+	//     one-photo-per-request contract the web admin panel already calls today. Response stays
+	//     exactly as before: `ApiResponse<EvidenceDto>`, a single object, so the existing web
+	//     frontend needs zero changes.
+	//   - `files` (plural, repeatable multipart part) — the new multi-photo contract for the
+	//     mobile app's updated report flow. Takes priority when present (even alongside a `file`
+	//     part, which should not happen in practice). Response is `ApiResponse<EvidenceUploadResultDto>`
+	//     — a per-file success/failure breakdown, since [EvidenceService.uploadBatch] is
+	//     partial-success rather than all-or-nothing (see its kdoc).
+	// Declared as `ApiResponse<*>` rather than a single generic type because the two branches
+	// return genuinely different payload shapes — Jackson serializes each by its runtime type
+	// regardless of the declared generic, so this has no effect on the actual JSON produced.
 	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@PostMapping("/{id}/evidence", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
 	fun uploadEvidence(
 		@PathVariable id: UUID,
-		@RequestParam("file") file: MultipartFile,
+		@RequestParam(value = "file", required = false) file: MultipartFile?,
+		@RequestParam(value = "files", required = false) files: List<MultipartFile>?,
 		@RequestParam(required = false) capturedAt: Instant?,
 		@RequestParam(required = false) latitude: Double?,
 		@RequestParam(required = false) longitude: Double?,
 		@AuthenticationPrincipal principal: CustomUserDetails
-	): ResponseEntity<ApiResponse<EvidenceDto>> =
-		ResponseEntity.status(HttpStatus.CREATED).body(
-			ApiResponse.ok(evidenceService.upload(id, file, capturedAt, latitude, longitude, principal))
+	): ResponseEntity<ApiResponse<*>> {
+		if (!files.isNullOrEmpty()) {
+			val result = evidenceService.uploadBatch(id, files, capturedAt, latitude, longitude, principal)
+			return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(result))
+		}
+		val singleFile = file ?: throw BadRequestException("error.evidence.file-empty")
+		return ResponseEntity.status(HttpStatus.CREATED).body(
+			ApiResponse.ok(evidenceService.upload(id, singleFile, capturedAt, latitude, longitude, principal))
 		)
+	}
 
 	// Gallery read for an incident's evidence — same ownership scoping as everything else in
 	// this controller (see EvidenceService#findAccessible kdoc).

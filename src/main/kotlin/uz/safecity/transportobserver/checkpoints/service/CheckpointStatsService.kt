@@ -9,6 +9,7 @@ import uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.util.PresenceUtils
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
+import uz.safecity.transportobserver.incidents.repository.IncidentRepository
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
 import uz.safecity.transportobserver.map.repository.InspectorLocationRepository
@@ -30,14 +31,22 @@ import java.util.UUID
  * IMPORTANT — honesty over completeness (see class-level TODOs on each DTO): this codebase has NO
  * Inspector-Checkpoint *permanent* assignment mechanism (see
  * [uz.safecity.transportobserver.inspector.service.InspectorPanelService] kdoc for that
- * long-standing gap) and [uz.safecity.transportobserver.incidents.entity.Incident] has NO
- * `checkpointId` column at all (unlike [uz.safecity.transportobserver.inspections.entity.Inspection],
- * which does). "On duty at this checkpoint" is answered ONLY via the new, optional, per-shift
- * [uz.safecity.transportobserver.shifts.entity.WorkShift.checkpointId] check-in (see that entity's
- * kdoc) — every other "checkpoint x inspector/incident" relationship this class is asked to
+ * long-standing gap). "On duty at this checkpoint" is answered ONLY via the new, optional,
+ * per-shift [uz.safecity.transportobserver.shifts.entity.WorkShift.checkpointId] check-in (see
+ * that entity's kdoc) — every other "checkpoint x inspector" relationship this class is asked to
  * report on that has no honest data source returns `null`, not a fabricated `0` or a heuristic
  * guess. Do not "fix" a `null` field here by inventing a proximity/nearest-checkpoint heuristic —
  * that would produce plausible-looking but arbitrary numbers.
+ *
+ * [uz.safecity.transportobserver.incidents.entity.Incident] NOW has a real, optional
+ * `checkpointId` FK (see that field's kdoc for the hybrid GPS-proximity-suggestion-but-user-must-
+ * confirm design) — [detectedIncidentsCount]/[detectedCasesCount] below are real
+ * [uz.safecity.transportobserver.incidents.repository.IncidentRepository.countByCheckpointIdAndCreatedAtBetween]
+ * counts, not placeholders anymore. This is still an honest, possibly-incomplete number, though:
+ * it only counts incidents where a caller (mobile app or web operator) explicitly linked a
+ * checkpoint — an inspector who skips/edits away the mobile app's nearby-checkpoint suggestion
+ * simply won't have that report counted here, which is correct (the backend must never guess a
+ * checkpoint on their behalf just to make this number "more complete").
  */
 @Service
 class CheckpointStatsService(
@@ -46,7 +55,8 @@ class CheckpointStatsService(
 	private val accountRepository: AccountRepository,
 	private val employeeRepository: EmployeeRepository,
 	private val inspectorLocationRepository: InspectorLocationRepository,
-	private val inspectionRepository: InspectionRepository
+	private val inspectionRepository: InspectionRepository,
+	private val incidentRepository: IncidentRepository
 ) {
 
 	/**
@@ -93,9 +103,10 @@ class CheckpointStatsService(
 	}
 
 	/**
-	 * `GET /api/v1/checkpoints/{id}/today-stats` — "BUGUNGI HOLAT" block. [detectedIncidentsCount]/
-	 * [averageInspectionDurationMinutes] are always `null` — see [CheckpointTodayStatsDto] kdoc for
-	 * exactly why neither can be computed honestly today.
+	 * `GET /api/v1/checkpoints/{id}/today-stats` — "BUGUNGI HOLAT" block.
+	 * [averageInspectionDurationMinutes] is always `null` — see [CheckpointTodayStatsDto] kdoc for
+	 * why that one still can't be computed honestly. [detectedIncidentsCount] is now a real
+	 * [IncidentRepository.countByCheckpointIdAndCreatedAtBetween] count — see that method's kdoc.
 	 */
 	fun getTodayStats(checkpointId: UUID): CheckpointTodayStatsDto {
 		assertCheckpointExists(checkpointId)
@@ -107,13 +118,18 @@ class CheckpointStatsService(
 			startOfToday,
 			endOfToday
 		)
+		val detectedIncidentsCount = incidentRepository.countByCheckpointIdAndCreatedAtBetween(
+			checkpointId,
+			startOfToday,
+			endOfToday
+		)
 
 		return CheckpointTodayStatsDto(
 			checkpointId = checkpointId,
 			onDutyInspectorsCount = workShiftService.openShiftsForCheckpoint(checkpointId).size,
 			inspectionsCompletedTodayCount = completedTodayCount.toInt(),
-			// No Incident.checkpointId / no Inspection "check duration" field — see kdoc above.
-			detectedIncidentsCount = null,
+			detectedIncidentsCount = detectedIncidentsCount.toInt(),
+			// No Inspection "check duration" field — see kdoc above.
 			averageInspectionDurationMinutes = null,
 			computedAt = Instant.now()
 		)
@@ -121,7 +137,9 @@ class CheckpointStatsService(
 
 	/**
 	 * `GET /api/v1/checkpoints/{id}/metrics` — "Tekshiruv/oy" / "Aniqlangan holat" / "Inspektor"
-	 * header row. [detectedCasesCount] is always `null` — see [CheckpointMetricsDto] kdoc.
+	 * header row. [detectedCasesCount] is now a real
+	 * [IncidentRepository.countByCheckpointIdAndCreatedAtBetween] count — see [CheckpointMetricsDto]
+	 * kdoc.
 	 */
 	fun getMetrics(checkpointId: UUID): CheckpointMetricsDto {
 		assertCheckpointExists(checkpointId)
@@ -138,12 +156,16 @@ class CheckpointStatsService(
 			startOfMonth,
 			startOfNextMonth
 		)
+		val detectedCasesCount = incidentRepository.countByCheckpointIdAndCreatedAtBetween(
+			checkpointId,
+			startOfMonth,
+			startOfNextMonth
+		)
 
 		return CheckpointMetricsDto(
 			checkpointId = checkpointId,
 			inspectionsThisMonthCount = inspectionsThisMonth.toInt(),
-			// No Incident.checkpointId — see kdoc above.
-			detectedCasesCount = null,
+			detectedCasesCount = detectedCasesCount.toInt(),
 			inspectorsThisMonthCount = distinctInspectors.toInt()
 		)
 	}

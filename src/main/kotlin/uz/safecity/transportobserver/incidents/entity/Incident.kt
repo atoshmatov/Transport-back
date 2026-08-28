@@ -178,6 +178,32 @@ class Incident(
 	 * person is named.
 	 */
 	@Column(name = "resolution_responsible_account_id")
-	var resolutionResponsibleAccountId: UUID? = null
+	var resolutionResponsibleAccountId: UUID? = null,
+
+	/**
+	 * The [uz.safecity.transportobserver.checkpoints.entity.Checkpoint] this incident is linked to
+	 * for the map's per-checkpoint "xavf darajasi" (risk level) rollup — see
+	 * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService] kdoc for how it's
+	 * aggregated. Plain FK column (not a mapped JPA relation), same convention as every other
+	 * cross-module reference on this entity ([assignedInspectorId], [vehicleId], [reportedBy]).
+	 *
+	 * HYBRID APPROACH — GPS-proximity is client-side UX only, never a server-side fact: the mobile
+	 * app's "Nazorat punkti" nearest-checkpoint suggestion
+	 * ([uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository.findNearestActive]
+	 * via `GET /api/v1/checkpoints/nearby`) is a pre-selected but user-CONFIRMABLE default in the UI.
+	 * The backend NEVER computes or overwrites this column from GPS proximity itself — it only
+	 * persists whatever [uz.safecity.transportobserver.incidents.dto.CreateIncidentRequest.checkpointId]
+	 * the caller explicitly sent (validated to reference a real [uz.safecity.transportobserver.checkpoints.entity.Checkpoint]
+	 * — see [uz.safecity.transportobserver.incidents.service.IncidentService.create]). Same
+	 * "never fabricate, never guess" rule already documented on [CheckpointStatsService] /
+	 * [uz.safecity.transportobserver.inspector.service.InspectorPanelService] — this field is what
+	 * closes that gap for Incident specifically, the same way
+	 * [uz.safecity.transportobserver.shifts.entity.WorkShift.checkpointId] closed it for shifts.
+	 *
+	 * Nullable: not every report is tied to a checkpoint (e.g. a roving-inspector SOS on open road),
+	 * so omitting it must remain valid — never backfilled or guessed.
+	 */
+	@Column(name = "checkpoint_id")
+	var checkpointId: UUID? = null
 
 ) : BaseEntity()

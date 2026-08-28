@@ -8,6 +8,8 @@ import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.common.storage.FileStorageService
 import uz.safecity.transportobserver.common.util.GeoUtils
 import uz.safecity.transportobserver.incidents.dto.EvidenceDto
+import uz.safecity.transportobserver.incidents.dto.EvidenceUploadFailureDto
+import uz.safecity.transportobserver.incidents.dto.EvidenceUploadResultDto
 import uz.safecity.transportobserver.incidents.entity.Evidence
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.repository.EvidenceRepository
@@ -56,7 +58,60 @@ class EvidenceService(
 		principal: CustomUserDetails
 	): EvidenceDto {
 		findAccessible(incidentId, principal)
+		return saveEvidence(incidentId, file, capturedAt, latitude, longitude, principal)
+	}
 
+	/**
+	 * Multi-photo counterpart of [upload] — backs the `files` (plural) request param on `POST
+	 * /incidents/{id}/evidence` (see
+	 * [uz.safecity.transportobserver.incidents.controller.IncidentController.uploadEvidence] kdoc).
+	 *
+	 * Deliberately PARTIAL-success, not an all-or-nothing transaction: each file is validated and
+	 * saved independently, and a [BadRequestException] from one file (wrong format, too large,
+	 * empty) is caught and reported in [EvidenceUploadResultDto.failed] instead of discarding the
+	 * other, valid files already saved earlier in the same request — a field inspector attaching
+	 * 5 photos should not lose 4 good ones because the 5th was a screenshot of the wrong file. An
+	 * unexpected (non-validation) exception — e.g. object storage unreachable — is NOT caught here
+	 * and propagates as a 500, rolling back everything saved so far in this batch; that is an
+	 * infra failure affecting every file equally, not a per-file data problem.
+	 *
+	 * [findAccessible] runs once up front (not per file) — same ownership/404 rule as [upload].
+	 */
+	@Transactional
+	fun uploadBatch(
+		incidentId: UUID,
+		files: List<MultipartFile>,
+		capturedAt: Instant?,
+		latitude: Double?,
+		longitude: Double?,
+		principal: CustomUserDetails
+	): EvidenceUploadResultDto {
+		findAccessible(incidentId, principal)
+		if (files.isEmpty()) throw BadRequestException("error.evidence.file-empty")
+
+		val uploaded = mutableListOf<EvidenceDto>()
+		val failed = mutableListOf<EvidenceUploadFailureDto>()
+
+		for (file in files) {
+			try {
+				uploaded += saveEvidence(incidentId, file, capturedAt, latitude, longitude, principal)
+			} catch (ex: BadRequestException) {
+				failed += EvidenceUploadFailureDto(fileName = file.originalFilename, message = ex.message)
+			}
+		}
+
+		return EvidenceUploadResultDto(uploaded = uploaded, failed = failed)
+	}
+
+	/** Validation + object-storage upload + [Evidence] row for a single already-ownership-checked file. Shared by [upload] and [uploadBatch]. */
+	private fun saveEvidence(
+		incidentId: UUID,
+		file: MultipartFile,
+		capturedAt: Instant?,
+		latitude: Double?,
+		longitude: Double?,
+		principal: CustomUserDetails
+	): EvidenceDto {
 		if (file.isEmpty) throw BadRequestException("error.evidence.file-empty")
 		if (file.size > MAX_FILE_SIZE_BYTES) {
 			throw BadRequestException("error.evidence.file-too-large", MAX_FILE_SIZE_BYTES / (1024 * 1024))

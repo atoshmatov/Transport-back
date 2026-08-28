@@ -18,6 +18,7 @@ import uz.safecity.transportobserver.reports.dto.RegionDistributionItemDto
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 
 /**
@@ -109,22 +110,30 @@ class ReportStatsService(
 	}
 
 	/**
-	 * [range] currently only accepts `"7d"` — TZ section 7 leaves the parameter open for future
-	 * ranges (e.g. `30d`), but no screen needs them yet, so anything else is rejected explicitly
-	 * rather than silently falling back to 7 days (which would hide a frontend bug).
-	 *
-	 * Fetches the 7-day window's inspections/incidents with a single `GROUP BY` query each (see
-	 * [InspectionRepository.countDailyCreatedBetween] / [IncidentRepository.countDailyCreatedBetween]),
+	 * [range] accepts `"7d"` (default), `"30d"`, or `"1y"` — anything else is rejected explicitly
+	 * rather than silently falling back to a default (which would hide a frontend bug). `"7d"`/
+	 * `"30d"` share the same daily-granularity path ([dailyActivity]); `"1y"` switches to MONTHLY
+	 * granularity ([monthlyActivity]) — 365 daily points would be far more than the "Yillik" chart
+	 * needs, so that window is bucketed by calendar month instead. [ActivityReportItemDto]'s shape
+	 * is identical either way: [ActivityReportItemDto.date] is the day itself for `7d`/`30d`, or
+	 * the first day of the month for `1y`.
+	 */
+	fun getActivity(range: String): List<ActivityReportItemDto> = when (range) {
+		"7d" -> dailyActivity(days = 7)
+		"30d" -> dailyActivity(days = 30)
+		"1y" -> monthlyActivity()
+		else -> throw BadRequestException("error.report.range-unsupported")
+	}
+
+	/**
+	 * Fetches the [days]-day window's inspections/incidents with a single `GROUP BY` query each
+	 * (see [InspectionRepository.countDailyCreatedBetween] / [IncidentRepository.countDailyCreatedBetween]),
 	 * then fills in every day of the window — including days with zero activity, which the `GROUP BY`
 	 * queries simply omit — so the frontend never has to handle missing days in the series.
 	 */
-	fun getActivity(range: String): List<ActivityReportItemDto> {
-		if (range != "7d") {
-			throw BadRequestException("error.report.range-unsupported")
-		}
-
+	private fun dailyActivity(days: Int): List<ActivityReportItemDto> {
 		val today = LocalDate.now(APP_ZONE)
-		val firstDay = today.minusDays(6) // 7-day window, inclusive of today
+		val firstDay = today.minusDays((days - 1).toLong()) // N-day window, inclusive of today
 		val (start, _) = dayRange(firstDay)
 		val (_, end) = dayRange(today)
 
@@ -133,12 +142,40 @@ class ReportStatsService(
 		val incidentsByDay = incidentRepository.countDailyCreatedBetween(start, end)
 			.associate { it.day to it.cnt }
 
-		return (0..6L).map { offset ->
+		return (0 until days.toLong()).map { offset ->
 			val day = firstDay.plusDays(offset)
 			ActivityReportItemDto(
 				date = day,
 				inspectionsCount = (inspectionsByDay[day] ?: 0L).toInt(),
 				incidentsCount = (incidentsByDay[day] ?: 0L).toInt()
+			)
+		}
+	}
+
+	/**
+	 * Fetches the trailing 12-calendar-month window (this month + the previous 11) with a single
+	 * `GROUP BY` month query each (see [InspectionRepository.countMonthlyCreatedBetween] /
+	 * [IncidentRepository.countMonthlyCreatedBetween]), then fills in every month of the window —
+	 * same "no missing points in the series" guarantee as [dailyActivity]. Each
+	 * [ActivityReportItemDto.date] is the first day of its month.
+	 */
+	private fun monthlyActivity(): List<ActivityReportItemDto> {
+		val currentMonth = YearMonth.now(APP_ZONE)
+		val firstMonth = currentMonth.minusMonths(11) // 12-month window, inclusive of the current month
+		val start = firstMonth.atDay(1).atStartOfDay(APP_ZONE).toInstant()
+		val end = currentMonth.plusMonths(1).atDay(1).atStartOfDay(APP_ZONE).toInstant()
+
+		val inspectionsByMonth = inspectionRepository.countMonthlyCreatedBetween(start, end)
+			.associate { it.month to it.cnt }
+		val incidentsByMonth = incidentRepository.countMonthlyCreatedBetween(start, end)
+			.associate { it.month to it.cnt }
+
+		return (0..11L).map { offset ->
+			val monthStart = firstMonth.plusMonths(offset).atDay(1)
+			ActivityReportItemDto(
+				date = monthStart,
+				inspectionsCount = (inspectionsByMonth[monthStart] ?: 0L).toInt(),
+				incidentsCount = (incidentsByMonth[monthStart] ?: 0L).toInt()
 			)
 		}
 	}

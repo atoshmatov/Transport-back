@@ -46,7 +46,9 @@ data class IncidentDto(
 	/** Last time this record (incl. its location/status) changed — see BaseEntity.updatedAt. */
 	val updatedAt: Instant?,
 	/** See [Incident.isSos] kdoc — true only for incidents created via `POST /inspector/me/sos`. */
-	val isSos: Boolean
+	val isSos: Boolean,
+	/** See [Incident.checkpointId] kdoc — user-confirmed only, never a proximity guess. */
+	val checkpointId: UUID?
 ) {
 	companion object {
 		fun from(incident: Incident, evidenceCount: Long = 0, assignedInspectorName: String? = null) = IncidentDto(
@@ -65,7 +67,8 @@ data class IncidentDto(
 			clientUuid = incident.clientUuid,
 			evidenceCount = evidenceCount,
 			updatedAt = incident.updatedAt,
-			isSos = incident.isSos
+			isSos = incident.isSos,
+			checkpointId = incident.checkpointId
 		)
 	}
 }
@@ -121,7 +124,9 @@ data class IncidentDetailDto(
 	/** [uz.safecity.transportobserver.employees.entity.Employee.fullName] of [resolutionResponsibleAccountId], if resolvable. */
 	val resolutionResponsibleName: String?,
 	/** Vaqt bo'yicha (eskidan yangiga) tartiblangan — see [uz.safecity.transportobserver.incidents.entity.IncidentStatusEvent]. */
-	val statusHistory: List<IncidentStatusEventDto>
+	val statusHistory: List<IncidentStatusEventDto>,
+	/** See [Incident.checkpointId] kdoc — user-confirmed only, never a proximity guess. */
+	val checkpointId: UUID?
 ) {
 	companion object {
 		fun from(
@@ -158,7 +163,8 @@ data class IncidentDetailDto(
 			resolutionDeadline = incident.resolutionDeadline,
 			resolutionResponsibleAccountId = incident.resolutionResponsibleAccountId,
 			resolutionResponsibleName = resolutionResponsibleName,
-			statusHistory = statusHistory
+			statusHistory = statusHistory,
+			checkpointId = incident.checkpointId
 		)
 	}
 }
@@ -221,7 +227,19 @@ data class CreateIncidentRequest(
 	 * [uz.safecity.transportobserver.incidents.entity.Incident.passengerCount] kdoc. Optional for
 	 * the same reason as [vehicleId].
 	 */
-	val passengerCount: Int? = null
+	val passengerCount: Int? = null,
+
+	/**
+	 * Checkpoint this report is linked to — see [uz.safecity.transportobserver.incidents.entity.Incident.checkpointId]
+	 * kdoc for the full "hybrid approach" reasoning. The mobile client may pre-fill this from
+	 * `GET /api/v1/checkpoints/nearby` (a GPS-proximity SUGGESTION), but this field is only ever
+	 * accepted here as the user's own explicit, confirmed/edited choice — the backend performs no
+	 * proximity computation of its own and never infers this value. Validated to reference a real
+	 * [uz.safecity.transportobserver.checkpoints.entity.Checkpoint] if present
+	 * (see IncidentService's private `validateCheckpointExists` — BadRequestException otherwise,
+	 * mirroring how [vehicleId] is validated). Optional: not every report is tied to a checkpoint.
+	 */
+	val checkpointId: UUID? = null
 )
 
 /** SUPER_ADMIN/ADMIN/OPERATOR only — see IncidentController#assignInspector. */

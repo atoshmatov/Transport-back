@@ -46,7 +46,13 @@ data class DashboardReportDto(
 	val lastUpdatedAt: Instant
 )
 
-/** One day's worth of `GET /api/v1/reports/activity?range=7d`, in `Asia/Tashkent` calendar days. */
+/**
+ * One data point of `GET /api/v1/reports/activity?range=`. For `range=7d`/`30d`, [date] is a
+ * calendar day (`Asia/Tashkent`) and there is one point per day in the window. For `range=1y`,
+ * [date] is the first day of a calendar month and there is one point per month over the trailing
+ * 12 months — see [uz.safecity.transportobserver.reports.service.ReportStatsService.getActivity]
+ * kdoc.
+ */
 data class ActivityReportItemDto(
 	val date: LocalDate,
 	val inspectionsCount: Int,

@@ -2,6 +2,7 @@ package uz.safecity.transportobserver.checkpoints.dto
 
 import uz.safecity.transportobserver.checkpointtypes.entity.CheckpointType
 import uz.safecity.transportobserver.checkpoints.entity.Checkpoint
+import uz.safecity.transportobserver.checkpoints.repository.CheckpointNearbyProjection
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
@@ -100,3 +101,30 @@ data class UpdateCheckpointStatusRequest(
 	@field:NotNull(message = "isActive majburiy")
 	val isActive: Boolean? = null
 )
+
+/**
+ * `GET /api/v1/checkpoints/nearby` row — see [uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository.findNearestActive]
+ * kdoc for the PostGIS query this comes from, and
+ * [uz.safecity.transportobserver.incidents.entity.Incident.checkpointId] kdoc for why this is a
+ * read-only SUGGESTION list only: the backend never writes anything from this endpoint, and never
+ * uses [distanceMeters] to decide a checkpoint on the caller's behalf — the mobile client shows
+ * these as a pre-selectable-but-user-editable list before `POST /incidents` is ever called with a
+ * `checkpointId`.
+ */
+data class CheckpointNearbyDto(
+	val checkpointId: UUID,
+	val name: String,
+	val latitude: Double,
+	val longitude: Double,
+	val distanceMeters: Double
+) {
+	companion object {
+		fun from(row: CheckpointNearbyProjection) = CheckpointNearbyDto(
+			checkpointId = row.id,
+			name = row.name,
+			latitude = row.latitude,
+			longitude = row.longitude,
+			distanceMeters = row.distanceMeters
+		)
+	}
+}

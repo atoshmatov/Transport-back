@@ -8,6 +8,9 @@ import uz.safecity.transportobserver.checkpoints.dto.CreateCheckpointRequest
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
 import uz.safecity.transportobserver.employees.entity.Employee
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
+import uz.safecity.transportobserver.incidents.entity.Incident
+import uz.safecity.transportobserver.incidents.entity.IncidentType
+import uz.safecity.transportobserver.incidents.repository.IncidentRepository
 import uz.safecity.transportobserver.inspections.entity.Inspection
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
@@ -57,6 +60,9 @@ class CheckpointStatsServiceTests {
 
 	@Autowired
 	lateinit var inspectionRepository: InspectionRepository
+
+	@Autowired
+	lateinit var incidentRepository: IncidentRepository
 
 	private fun createCheckpoint(name: String = "Test nazorat punkti ${UUID.randomUUID()}") =
 		checkpointService.create(CreateCheckpointRequest(name = name, latitude = 41.3, longitude = 69.2))
@@ -144,12 +150,19 @@ class CheckpointStatsServiceTests {
 		// Same checkpoint but PLANNED (not completed) -> must not be counted.
 		inspectionRepository.save(Inspection(checkpointId = checkpoint.id, status = InspectionStatus.PLANNED))
 
+		// Incident explicitly linked (user-confirmed) to this checkpoint -> counted.
+		incidentRepository.save(Incident(title = "Linked here", type = IncidentType.VIOLATION, checkpointId = checkpoint.id))
+		// Incident linked to a DIFFERENT checkpoint -> must not leak into this checkpoint's count.
+		incidentRepository.save(Incident(title = "Linked elsewhere", type = IncidentType.VIOLATION, checkpointId = otherCheckpoint.id))
+		// Incident with no checkpointId at all (never fabricated/guessed) -> must not be counted anywhere.
+		incidentRepository.save(Incident(title = "Unlinked", type = IncidentType.VIOLATION))
+
 		val stats = checkpointStatsService.getTodayStats(checkpoint.id)
 
 		assertEquals(checkpoint.id, stats.checkpointId)
 		assertEquals(1, stats.inspectionsCompletedTodayCount)
 		assertEquals(0, stats.onDutyInspectorsCount)
-		assertNull(stats.detectedIncidentsCount, "Incident has no checkpointId — must stay null, never a fabricated 0")
+		assertEquals(1, stats.detectedIncidentsCount, "only the incident explicitly linked to THIS checkpoint counts")
 		assertNull(stats.averageInspectionDurationMinutes, "no honest 'check duration' field exists — must stay null")
 	}
 
@@ -175,12 +188,15 @@ class CheckpointStatsServiceTests {
 			)
 		)
 
+		// Incident explicitly linked to this checkpoint, created this month -> counted.
+		incidentRepository.save(Incident(title = "This month, this checkpoint", type = IncidentType.VIOLATION, checkpointId = checkpoint.id))
+
 		val metrics = checkpointStatsService.getMetrics(checkpoint.id)
 
 		assertEquals(checkpoint.id, metrics.checkpointId)
 		assertEquals(1, metrics.inspectionsThisMonthCount)
 		assertEquals(2, metrics.inspectorsThisMonthCount)
-		assertNull(metrics.detectedCasesCount, "Incident has no checkpointId — must stay null, never a fabricated 0")
+		assertEquals(1, metrics.detectedCasesCount, "only the incident explicitly linked to THIS checkpoint counts")
 	}
 
 	@Test

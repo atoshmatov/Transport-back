@@ -5,6 +5,7 @@ import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
+import uz.safecity.transportobserver.checkpoints.repository.CheckpointRepository
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ConflictException
@@ -62,6 +63,7 @@ class IncidentService(
 	private val accountRepository: AccountRepository,
 	private val employeeRepository: EmployeeRepository,
 	private val vehicleRepository: VehicleRepository,
+	private val checkpointRepository: CheckpointRepository,
 	private val incidentStatusEventRepository: IncidentStatusEventRepository,
 	private val auditService: AuditService,
 	private val notificationService: NotificationService,
@@ -191,6 +193,7 @@ class IncidentService(
 		}
 
 		request.vehicleId?.let { validateVehicleExists(it) }
+		request.checkpointId?.let { validateCheckpointExists(it) }
 
 		val incident = Incident(
 			title = request.title,
@@ -204,7 +207,8 @@ class IncidentService(
 			regionName = null,
 			clientUuid = request.clientUuid,
 			vehicleId = request.vehicleId,
-			passengerCount = request.passengerCount
+			passengerCount = request.passengerCount,
+			checkpointId = request.checkpointId
 		)
 		val saved = incidentRepository.save(incident)
 
@@ -587,6 +591,20 @@ class IncidentService(
 	private fun validateVehicleExists(vehicleId: UUID) {
 		if (!vehicleRepository.existsById(vehicleId)) {
 			throw BadRequestException("error.incident.vehicle-not-found", vehicleId)
+		}
+	}
+
+	/**
+	 * [CreateIncidentRequest.checkpointId] must reference a real
+	 * [uz.safecity.transportobserver.checkpoints.entity.Checkpoint] row — see
+	 * [Incident.checkpointId] kdoc for why this is the ONLY thing the backend ever does with a
+	 * checkpoint id it receives (never computed/guessed from GPS proximity), mirroring
+	 * [validateVehicleExists] and [uz.safecity.transportobserver.shifts.service.WorkShiftService.startShift]'s
+	 * own optional-checkpoint-id existence check.
+	 */
+	private fun validateCheckpointExists(checkpointId: UUID) {
+		if (!checkpointRepository.existsById(checkpointId)) {
+			throw BadRequestException("error.incident.checkpoint-not-found", checkpointId)
 		}
 	}
 

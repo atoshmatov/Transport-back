@@ -43,22 +43,24 @@ data class CheckpointOnDutyInspectorDto(
  * block. See [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getTodayStats]
  * for exactly how each field is computed.
  *
- * [detectedIncidentsCount] and [averageInspectionDurationMinutes] are `null` — NOT `0` — because
- * this codebase genuinely cannot compute either honestly yet:
- * - [uz.safecity.transportobserver.incidents.entity.Incident] has no `checkpointId` column at all
- *   (unlike [uz.safecity.transportobserver.inspections.entity.Inspection], which does), so there is
- *   no way to say "this many incidents were detected AT this checkpoint" without guessing (e.g. by
- *   proximity) — see [CheckpointStatsService] kdoc. Returning `0` here would silently claim "zero
- *   incidents detected", which is a fabricated fact, not an absent one.
- * - [uz.safecity.transportobserver.inspections.entity.Inspection] has no "check started" timestamp
- *   distinct from [uz.safecity.transportobserver.inspections.entity.Inspection.scheduledAt] (when
- *   an admin PLANNED it, not when the inspector actually began performing it) — so
- *   `performedAt - scheduledAt` would measure "how late/early was this compared to when it was
- *   scheduled", not "how long did the inspection take", and labeling that difference "o'rtacha
- *   tekshiruv vaqti" would be misleading, not merely approximate.
+ * [detectedIncidentsCount] is a real, FK-backed count now that
+ * [uz.safecity.transportobserver.incidents.entity.Incident.checkpointId] exists — see
+ * [uz.safecity.transportobserver.incidents.repository.IncidentRepository.countByCheckpointIdAndCreatedAtBetween]
+ * kdoc. It only counts incidents where a caller explicitly linked this checkpoint (never a
+ * proximity guess — see [Incident.checkpointId] kdoc for the hybrid-approach rule), so it can
+ * legitimately under-count real on-the-ground incidents an inspector didn't tag; that is an honest
+ * gap in the data, not a bug in this count.
  *
- * `@JsonInclude(ALWAYS)` so these two fields always serialize as explicit `null` rather than being
- * omitted — same convention as
+ * [averageInspectionDurationMinutes] is still always `null` — NOT `0` — because
+ * [uz.safecity.transportobserver.inspections.entity.Inspection] has no "check started" timestamp
+ * distinct from [uz.safecity.transportobserver.inspections.entity.Inspection.scheduledAt] (when an
+ * admin PLANNED it, not when the inspector actually began performing it) — so
+ * `performedAt - scheduledAt` would measure "how late/early was this compared to when it was
+ * scheduled", not "how long did the inspection take", and labeling that difference "o'rtacha
+ * tekshiruv vaqti" would be misleading, not merely approximate.
+ *
+ * `@JsonInclude(ALWAYS)` so [averageInspectionDurationMinutes] always serializes as explicit `null`
+ * rather than being omitted — same convention as
  * [uz.safecity.transportobserver.inspector.dto.InspectorCurrentLocationDto], so the mobile client
  * can render an explicit "ma'lumot yo'q" state instead of treating a missing key as a bug.
  */
@@ -67,7 +69,7 @@ data class CheckpointTodayStatsDto(
 	val checkpointId: UUID,
 	val onDutyInspectorsCount: Int,
 	val inspectionsCompletedTodayCount: Int,
-	val detectedIncidentsCount: Int?,
+	val detectedIncidentsCount: Int,
 	val averageInspectionDurationMinutes: Double?,
 	val computedAt: Instant
 )
@@ -77,11 +79,10 @@ data class CheckpointTodayStatsDto(
  * ("Tekshiruv/oy", "Aniqlangan holat", "Inspektor"). See
  * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService.getMetrics].
  *
- * [detectedCasesCount] is `null` for the same reason as
- * [CheckpointTodayStatsDto.detectedIncidentsCount] — [uz.safecity.transportobserver.incidents.entity.Incident]
- * has no `checkpointId`, so a checkpoint-scoped "aniqlangan holat" count cannot be computed
- * honestly today. [inspectorsThisMonthCount] answers "how many distinct inspectors had at least
- * one inspection task at this checkpoint this month" — NOT "how many are on duty right now" (see
+ * [detectedCasesCount] is a real, FK-backed count for the same reason as
+ * [CheckpointTodayStatsDto.detectedIncidentsCount] — see that field's kdoc.
+ * [inspectorsThisMonthCount] answers "how many distinct inspectors had at least one inspection
+ * task at this checkpoint this month" — NOT "how many are on duty right now" (see
  * [uz.safecity.transportobserver.inspections.repository.InspectionRepository.countDistinctInspectorsByCheckpointIdAndCreatedAtBetween]
  * kdoc); use `GET /{id}/on-duty`'s result size for the real-time headcount instead.
  */
@@ -89,6 +90,6 @@ data class CheckpointTodayStatsDto(
 data class CheckpointMetricsDto(
 	val checkpointId: UUID,
 	val inspectionsThisMonthCount: Int,
-	val detectedCasesCount: Int?,
+	val detectedCasesCount: Int,
 	val inspectorsThisMonthCount: Int
 )

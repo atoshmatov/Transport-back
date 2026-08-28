@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.checkpoints.service
 
 import uz.safecity.transportobserver.checkpoints.dto.CheckpointDto
+import uz.safecity.transportobserver.checkpoints.dto.CheckpointNearbyDto
 import uz.safecity.transportobserver.checkpoints.dto.CreateCheckpointRequest
 import uz.safecity.transportobserver.checkpoints.dto.UpdateCheckpointRequest
 import uz.safecity.transportobserver.checkpoints.entity.Checkpoint
@@ -10,6 +11,7 @@ import uz.safecity.transportobserver.checkpointtypes.repository.CheckpointTypeRe
 import uz.safecity.transportobserver.common.dto.PageResponse
 import uz.safecity.transportobserver.common.exception.BadRequestException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
+import uz.safecity.transportobserver.common.util.GeoUtils
 import jakarta.persistence.criteria.Predicate
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
@@ -63,6 +65,29 @@ class CheckpointService(
 
 	/** Consumed by InspectorPanelService for `DashboardSummaryDto.activeCheckpointsCount`. */
 	fun countActive(): Long = checkpointRepository.countByIsActiveTrue()
+
+	/**
+	 * `GET /api/v1/checkpoints/nearby` — the mobile client's nearest-checkpoint SUGGESTION list for
+	 * the "hodisa yaratish" flow (see [uz.safecity.transportobserver.incidents.entity.Incident.checkpointId]
+	 * kdoc for the full hybrid-approach reasoning). Purely a read: [checkpointRepository.findNearestActive]
+	 * ranks active checkpoints by real PostGIS distance, nothing here decides or persists anything
+	 * on the caller's behalf.
+	 *
+	 * [limit] is clamped to `[1, 50]` — a client-supplied value outside that range (0, negative, or
+	 * an unreasonably large number) is defensively normalized rather than rejected, since this is a
+	 * convenience list, not a data-integrity-sensitive write.
+	 *
+	 * Reuses [GeoUtils.toPoint] purely for its shared lat/lng range validation (same
+	 * `error.geo.invalid-latitude`/`error.geo.invalid-longitude` as every other module accepting a
+	 * client-supplied point — see that object's kdoc); the [org.locationtech.jts.geom.Point] it
+	 * builds is discarded; the actual distance math happens in the native query.
+	 */
+	fun findNearby(latitude: Double, longitude: Double, limit: Int): List<CheckpointNearbyDto> {
+		GeoUtils.toPoint(latitude, longitude)
+		val effectiveLimit = limit.coerceIn(1, 50)
+		return checkpointRepository.findNearestActive(latitude, longitude, effectiveLimit)
+			.map { CheckpointNearbyDto.from(it) }
+	}
 
 	@Transactional
 	fun create(request: CreateCheckpointRequest): CheckpointDto {

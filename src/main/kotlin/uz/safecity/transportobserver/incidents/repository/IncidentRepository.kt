@@ -1,6 +1,7 @@
 package uz.safecity.transportobserver.incidents.repository
 
 import uz.safecity.transportobserver.common.dto.DailyCountProjection
+import uz.safecity.transportobserver.common.dto.MonthlyCountProjection
 import uz.safecity.transportobserver.common.dto.RegionCountProjection
 import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
@@ -77,6 +78,23 @@ interface IncidentRepository : JpaRepository<Incident, UUID>, JpaSpecificationEx
 	fun countDailyCreatedBetween(@Param("start") start: Instant, @Param("end") end: Instant): List<DailyCountProjection>
 
 	/**
+	 * Reports `activity` widget's `range=1y` window (ReportStatsService) — sibling of
+	 * [uz.safecity.transportobserver.inspections.repository.InspectionRepository.countMonthlyCreatedBetween],
+	 * same reasoning (native `GROUP BY` month, `Asia/Tashkent` zone, `createdAt` not `occurredAt`).
+	 */
+	@Query(
+		value = """
+			select date_trunc('month', created_at at time zone 'Asia/Tashkent')::date as month, count(*) as cnt
+			from incidents
+			where created_at >= :start and created_at < :end
+			group by month
+			order by month
+		""",
+		nativeQuery = true
+	)
+	fun countMonthlyCreatedBetween(@Param("start") start: Instant, @Param("end") end: Instant): List<MonthlyCountProjection>
+
+	/**
 	 * Mobile Profile screen "hodisa turi bo'yicha" donut (InspectorPanelService#getIncidentTypeBreakdown)
 	 * — [IncidentType] counts scoped to a single inspector's own assigned incidents (any [IncidentStatus]).
 	 * One `GROUP BY` query rather than one `COUNT` per [IncidentType] value.
@@ -99,6 +117,14 @@ interface IncidentRepository : JpaRepository<Incident, UUID>, JpaSpecificationEx
 	fun findTop10ByAssignedInspectorIdOrderByCreatedAtDesc(assignedInspectorId: UUID): List<Incident>
 
 	/**
+	 * `POST /reports` INCIDENTS_SUMMARY generation (ReportGenerationService) — every incident
+	 * reported within the report's `[periodStart, periodEnd)` window, any status/type. Uses
+	 * `createdAt`, not `occurredAt`, for the same reliability reason as
+	 * [countDailyCreatedBetween]'s kdoc: `occurredAt` is caller-reported and can be null/backdated.
+	 */
+	fun findByCreatedAtBetween(start: Instant, end: Instant): List<Incident>
+
+	/**
 	 * Mobile "Transport vositasi" (vehicleDetail) screen's violation history —
 	 * `GET /api/v1/inspector/vehicles/{id}` (InspectorPanelService#getVehicleDetail). Deliberately
 	 * NOT scoped to any one inspector (contrast [findTop10ByAssignedInspectorIdOrderByCreatedAtDesc]) —
@@ -110,6 +136,18 @@ interface IncidentRepository : JpaRepository<Incident, UUID>, JpaSpecificationEx
 	 * for this screen, same as that one.
 	 */
 	fun findTop20ByVehicleIdOrderByCreatedAtDesc(vehicleId: UUID): List<Incident>
+
+	/**
+	 * Real, FK-backed "incidents linked to this checkpoint" count for
+	 * [uz.safecity.transportobserver.checkpoints.service.CheckpointStatsService]'s `today-stats`/
+	 * `metrics` endpoints (the map's per-checkpoint "xavf darajasi" rollup) — replaces the previous
+	 * always-`null` placeholder now that [Incident.checkpointId] is a real FK (see that field's
+	 * kdoc for the "never a proximity guess" rule this still honors: this simply counts whatever
+	 * [Incident.checkpointId] values were explicitly confirmed by a caller, nothing invented here).
+	 * `createdAt`, not `occurredAt`, for the same reliability reason as [countDailyCreatedBetween]'s
+	 * kdoc.
+	 */
+	fun countByCheckpointIdAndCreatedAtBetween(checkpointId: UUID, start: Instant, end: Instant): Long
 }
 
 /** See [IncidentRepository.countGroupByTypeForInspector]. */
