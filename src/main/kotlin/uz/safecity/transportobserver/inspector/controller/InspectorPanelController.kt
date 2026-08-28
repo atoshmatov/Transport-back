@@ -3,6 +3,7 @@ package uz.safecity.transportobserver.inspector.controller
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.dto.ApiResponse
 import uz.safecity.transportobserver.common.dto.PageResponse
+import uz.safecity.transportobserver.employees.dto.EmployeePositionHistoryDto
 import uz.safecity.transportobserver.incidents.dto.CreateSosRequest
 import uz.safecity.transportobserver.incidents.dto.IncidentDto
 import uz.safecity.transportobserver.incidents.service.IncidentService
@@ -255,4 +256,21 @@ class InspectorPanelController(
 		@AuthenticationPrincipal principal: CustomUserDetails
 	): ResponseEntity<ApiResponse<ProfileDetailDto>> =
 		ResponseEntity.ok(ApiResponse.ok(profileDetailService.getMyProfileDetail(principal)))
+
+	/**
+	 * Mobile "Xodim kartasi" (`profileDetail`) screen's lavozim/hudud o'zgarish jurnali — the
+	 * caller's OWN history only, resolved via `principal.accountId`, same INSPECTOR-only
+	 * `/me/...`-scoped pattern as every other endpoint on this controller. See
+	 * [ProfileDetailService.getMyPositionHistory] kdoc: this is deliberately a separate, narrower
+	 * endpoint from the admin-only
+	 * [uz.safecity.transportobserver.employees.controller.AdminEmployeeController.getPositionHistory]
+	 * (`GET /api/v1/admin/employees/{id}/position-history`) rather than a role carve-out on it — same
+	 * split rationale as [getMyProfileDetail] vs. the admin employee-detail endpoints.
+	 */
+	@PreAuthorize("hasAuthority('ROLE_INSPECTOR')")
+	@GetMapping("/me/position-history")
+	fun getMyPositionHistory(
+		@AuthenticationPrincipal principal: CustomUserDetails
+	): ResponseEntity<ApiResponse<List<EmployeePositionHistoryDto>>> =
+		ResponseEntity.ok(ApiResponse.ok(profileDetailService.getMyPositionHistory(principal)))
 }

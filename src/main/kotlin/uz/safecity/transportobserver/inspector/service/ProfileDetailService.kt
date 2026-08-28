@@ -5,7 +5,9 @@ import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.common.exception.ResourceNotFoundException
+import uz.safecity.transportobserver.employees.dto.EmployeePositionHistoryDto
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
+import uz.safecity.transportobserver.employees.service.EmployeePositionHistoryService
 import uz.safecity.transportobserver.incidents.repository.IncidentRepository
 import uz.safecity.transportobserver.inspections.entity.InspectionStatus
 import uz.safecity.transportobserver.inspections.repository.InspectionRepository
@@ -20,7 +22,9 @@ import org.springframework.stereotype.Service
 
 /**
  * Backs `GET /api/v1/inspector/me/profile-detail` — the mobile "Xodim kartasi" (`profileDetail`,
- * opened from the Profile tab, `backTo: 'profile'`) full-profile screen.
+ * opened from the Profile tab, `backTo: 'profile'`) full-profile screen — and
+ * `GET /api/v1/inspector/me/position-history` (see [getMyPositionHistory]), that screen's
+ * lavozim/hudud o'zgarish jurnali.
  *
  * The design (`TO-Screen.dc.html` `profileDetail`, ~line 813) shows a LOT more than the original
  * columns covered: JSHSHIR, birth date, home address, email, service-certificate number/expiry,
@@ -53,20 +57,14 @@ class ProfileDetailService(
 	private val ratingService: RatingService,
 	private val incidentRepository: IncidentRepository,
 	private val inspectionRepository: InspectionRepository,
-	private val workShiftRepository: WorkShiftRepository
+	private val workShiftRepository: WorkShiftRepository,
+	private val employeePositionHistoryService: EmployeePositionHistoryService
 ) {
 
 	fun getMyProfileDetail(principal: CustomUserDetails): ProfileDetailDto {
 		assertInspector(principal.role)
 		val accountId = principal.accountId
-
-		// A logged-in INSPECTOR is guaranteed an active Account (blocked accounts can't authenticate,
-		// see AuthService.login) with an employeeId (EmployeeService.create always sets it when
-		// provisioning an INSPECTOR account) — same guarantee RatingService.getMyRating relies on.
-		val account = accountRepository.findById(accountId).orElse(null)
-			?: throw ResourceNotFoundException("error.employee.not-found", accountId)
-		val employeeId = account.employeeId
-			?: throw ResourceNotFoundException("error.employee.not-found", accountId)
+		val employeeId = resolveMyEmployeeId(accountId)
 		val employee = employeeRepository.findById(employeeId).orElse(null)
 			?: throw ResourceNotFoundException("error.employee.not-found", employeeId)
 
@@ -84,6 +82,34 @@ class ProfileDetailService(
 			assignedVehicle = assignedVehicle,
 			recentActivity = getRecentActivity(accountId)
 		)
+	}
+
+	/**
+	 * Backs `GET /api/v1/inspector/me/position-history` — the mobile profileDetail screen's
+	 * lavozim/hudud o'zgarish jurnali, scoped to the caller's OWN
+	 * [uz.safecity.transportobserver.employees.entity.Employee] row via the same
+	 * `principal.accountId` -> `Account.employeeId` chain as [getMyProfileDetail] (there is no path
+	 * here to look up another inspector's history — unlike the admin-only
+	 * `GET /api/v1/admin/employees/{id}/position-history`, which takes an arbitrary path `id`).
+	 * Delegates the actual query to [EmployeePositionHistoryService.list], the same method backing
+	 * that admin endpoint (see [uz.safecity.transportobserver.employees.controller.AdminEmployeeController.getPositionHistory]).
+	 */
+	fun getMyPositionHistory(principal: CustomUserDetails): List<EmployeePositionHistoryDto> {
+		assertInspector(principal.role)
+		val employeeId = resolveMyEmployeeId(principal.accountId)
+		return employeePositionHistoryService.list(employeeId)
+	}
+
+	/**
+	 * A logged-in INSPECTOR is guaranteed an active Account (blocked accounts can't authenticate,
+	 * see AuthService.login) with an employeeId (EmployeeService.create always sets it when
+	 * provisioning an INSPECTOR account) — same guarantee RatingService.getMyRating relies on.
+	 */
+	private fun resolveMyEmployeeId(accountId: java.util.UUID): java.util.UUID {
+		val account = accountRepository.findById(accountId).orElse(null)
+			?: throw ResourceNotFoundException("error.employee.not-found", accountId)
+		return account.employeeId
+			?: throw ResourceNotFoundException("error.employee.not-found", accountId)
 	}
 
 	/**

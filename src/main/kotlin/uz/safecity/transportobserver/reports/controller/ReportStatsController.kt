@@ -15,9 +15,20 @@ import org.springframework.web.bind.annotation.RestController
 
 /**
  * Admin dashboard + reports screens (TZ section 7): `GET /dashboard`, `GET /activity`,
- * `GET /regions-distribution`, `GET /checkpoints-distribution`. SUPER_ADMIN/ADMIN/OPERATOR only —
- * these are dispatch/management views, not something a field INSPECTOR needs, same role set as
+ * `GET /regions-distribution`, `GET /checkpoints-distribution`. `GET /dashboard` stays
+ * SUPER_ADMIN/ADMIN/OPERATOR-only — these are dispatch/management KPI cards, not something a
+ * field INSPECTOR needs, same role set as
  * [uz.safecity.transportobserver.inspections.controller.InspectionController]'s `create` endpoint.
+ *
+ * `GET /activity`, `GET /regions-distribution` and `GET /checkpoints-distribution` additionally
+ * allow ROLE_INSPECTOR — the mobile TransportO app's Stats screen (INSPECTOR-only accounts) calls
+ * these three. Safe to open up: each one is a pure aggregate/count query with no per-caller or
+ * per-region filtering to begin with (see [ReportStatsService.getActivity]/
+ * [ReportStatsService.getRegionsDistribution]/[ReportStatsService.getCheckpointsDistribution]
+ * kdocs) — an ADMIN/OPERATOR already sees the exact same all-regions/all-time totals an INSPECTOR
+ * would, so there is no individual-inspector or incident-level detail being newly exposed here.
+ * Same "add ROLE_INSPECTOR to an existing aggregate-stats endpoint" pattern previously applied to
+ * `CheckpointStatsApi`'s `on-duty`/`today-stats`/`metrics` endpoints.
  *
  * Mounted on the same `/api/v1/reports` base path as the pre-existing
  * [uz.safecity.transportobserver.reports.controller.ReportController] (generated-report-FILE
@@ -41,28 +52,29 @@ class ReportStatsController(
 		ResponseEntity.ok(ApiResponse.ok(reportStatsService.getDashboard()))
 
 	// range: "7d" (default) / "30d" -> one point per day; "1y" -> one point per calendar month.
-	// See ReportStatsService#getActivity kdoc.
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	// See ReportStatsService#getActivity kdoc. ROLE_INSPECTOR allowed — see class kdoc.
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/activity")
 	fun activity(
 		@RequestParam(defaultValue = "7d") range: String
 	): ResponseEntity<ApiResponse<List<ActivityReportItemDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(reportStatsService.getActivity(range)))
 
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	// ROLE_INSPECTOR allowed — see class kdoc.
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/regions-distribution")
 	fun regionsDistribution(): ResponseEntity<ApiResponse<List<RegionDistributionItemDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(reportStatsService.getRegionsDistribution()))
 
 	/**
 	 * Map/dashboard checkpoint-category legend — see [ReportStatsService.getCheckpointsDistribution]
-	 * kdoc. Kept SUPER_ADMIN/ADMIN/OPERATOR-only for consistency with the rest of this controller's
-	 * dispatch/management views, even though the raw checkpoint list it's derived from
-	 * ([uz.safecity.transportobserver.map.controller.MapController]'s `GET /map/checkpoints`) is
-	 * open to INSPECTOR too — this endpoint answers an admin-dashboard aggregate question, not
-	 * "where are the checkpoints on my map", which is the INSPECTOR-facing use case.
+	 * kdoc. Also allows ROLE_INSPECTOR (mobile Stats screen) — see class kdoc — even though the raw
+	 * checkpoint list it's derived from
+	 * ([uz.safecity.transportobserver.map.controller.MapController]'s `GET /map/checkpoints`) is a
+	 * separate, differently-shaped endpoint for a different use case ("where are the checkpoints on
+	 * my map" vs. this one's admin-dashboard-style aggregate legend).
 	 */
-	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR')")
+	@PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_INSPECTOR')")
 	@GetMapping("/checkpoints-distribution")
 	fun checkpointsDistribution(): ResponseEntity<ApiResponse<List<CheckpointTypeDistributionItemDto>>> =
 		ResponseEntity.ok(ApiResponse.ok(reportStatsService.getCheckpointsDistribution()))

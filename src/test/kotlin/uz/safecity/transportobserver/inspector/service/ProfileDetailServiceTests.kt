@@ -7,6 +7,7 @@ import uz.safecity.transportobserver.auth.security.CustomUserDetails
 import uz.safecity.transportobserver.common.exception.ForbiddenException
 import uz.safecity.transportobserver.employees.entity.Employee
 import uz.safecity.transportobserver.employees.repository.EmployeeRepository
+import uz.safecity.transportobserver.employees.service.EmployeePositionHistoryService
 import uz.safecity.transportobserver.incidents.entity.ActionType
 import uz.safecity.transportobserver.incidents.entity.Incident
 import uz.safecity.transportobserver.incidents.entity.IncidentType
@@ -66,6 +67,9 @@ class ProfileDetailServiceTests {
 
 	@Autowired
 	lateinit var workShiftRepository: WorkShiftRepository
+
+	@Autowired
+	lateinit var employeePositionHistoryService: EmployeePositionHistoryService
 
 	private fun createEmployee(): Employee = employeeRepository.save(
 		Employee(
@@ -218,6 +222,52 @@ class ProfileDetailServiceTests {
 
 		assertThrows(ForbiddenException::class.java) {
 			profileDetailService.getMyProfileDetail(CustomUserDetails.from(admin))
+		}
+	}
+
+	@Test
+	fun `getMyPositionHistory returns the caller's own spells newest-first`() {
+		val employee = createEmployee()
+		val employeeId = requireNotNull(employee.id)
+		val account = createInspectorAccount(employeeId)
+
+		// Same writer EmployeeService.create/update use — see EmployeePositionHistoryService kdoc.
+		employeePositionHistoryService.recordChange(employeeId, "Inspektor", "Toshkent shahri")
+		employeePositionHistoryService.recordChange(employeeId, "Katta inspektor", "Toshkent shahri")
+
+		val result = profileDetailService.getMyPositionHistory(CustomUserDetails.from(account))
+
+		assertEquals(2, result.size)
+		assertEquals("Katta inspektor", result[0].position)
+		assertNull(result[0].endedAt)
+		assertEquals("Inspektor", result[1].position)
+		assertTrue(result[1].endedAt != null)
+	}
+
+	@Test
+	fun `getMyPositionHistory is empty when the employee has no recorded spells yet`() {
+		val employee = createEmployee()
+		val account = createInspectorAccount(requireNotNull(employee.id))
+
+		val result = profileDetailService.getMyPositionHistory(CustomUserDetails.from(account))
+
+		assertEquals(0, result.size)
+	}
+
+	@Test
+	fun `getMyPositionHistory rejects a non-INSPECTOR caller (mirrors the controller's 403)`() {
+		val admin = accountRepository.save(
+			Account(
+				username = "admin_${UUID.randomUUID().toString().take(20)}",
+				passwordHash = "irrelevant-for-this-test",
+				role = RoleType.ADMIN,
+				mustChangePassword = false,
+				isActive = true
+			)
+		)
+
+		assertThrows(ForbiddenException::class.java) {
+			profileDetailService.getMyPositionHistory(CustomUserDetails.from(admin))
 		}
 	}
 }
