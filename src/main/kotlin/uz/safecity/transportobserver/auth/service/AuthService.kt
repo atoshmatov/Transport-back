@@ -7,12 +7,14 @@ import uz.safecity.transportobserver.auth.dto.LoginRequest
 import uz.safecity.transportobserver.auth.dto.LoginResponse
 import uz.safecity.transportobserver.auth.dto.RefreshResponse
 import uz.safecity.transportobserver.auth.dto.ResetPasswordResponse
+import uz.safecity.transportobserver.auth.dto.SessionDto
 import uz.safecity.transportobserver.auth.entity.Account
 import uz.safecity.transportobserver.auth.entity.RoleType
 import uz.safecity.transportobserver.auth.repository.AccountRepository
 import uz.safecity.transportobserver.auth.security.RefreshTokenService
 import uz.safecity.transportobserver.auth.security.JwtService
 import uz.safecity.transportobserver.auth.security.RoleHierarchyGuard
+import uz.safecity.transportobserver.auth.security.SessionDevice
 import uz.safecity.transportobserver.auth.security.TemporaryPasswordGenerator
 import uz.safecity.transportobserver.common.exception.AccountDisabledException
 import uz.safecity.transportobserver.common.exception.AccountLockedException
@@ -45,9 +47,13 @@ class AuthService(
 	 * Returns the response DTO paired with the raw refresh token so the controller can put the
 	 * token in an HttpOnly cookie — it must NEVER end up in [LoginResponse] itself, see that
 	 * class's kdoc.
+	 *
+	 * [clientPlatformHeader]/[userAgent] are the raw `X-Client-Platform`/`User-Agent` request
+	 * headers, forwarded down purely to label the new session for the "Faol sessiyalar" list — see
+	 * [SessionDevice] kdoc. Neither influences authentication itself.
 	 */
 	@Transactional
-	fun login(request: LoginRequest): Pair<LoginResponse, String> {
+	fun login(request: LoginRequest, clientPlatformHeader: String?, userAgent: String?): Pair<LoginResponse, String> {
 		val account = accountRepository.findByUsername(request.username)
 			.orElseThrow { InvalidCredentialsException() }
 
@@ -72,12 +78,12 @@ class AuthService(
 
 		accountRepository.resetFailedAttempts(accountId)
 
-		return buildLoginResponse(account)
+		return buildLoginResponse(account, clientPlatformHeader, userAgent)
 	}
 
-	/** Same body/cookie split as [login] — see its kdoc. */
+	/** Same body/cookie split as [login] — see its kdoc. Same [clientPlatformHeader]/[userAgent] purpose as [login]'s kdoc. */
 	@Transactional
-	fun refresh(refreshToken: String): Pair<RefreshResponse, String> {
+	fun refresh(refreshToken: String, clientPlatformHeader: String?, userAgent: String?): Pair<RefreshResponse, String> {
 		val accountId = refreshTokenService.resolveAccountId(refreshToken)
 			?: throw RefreshTokenInvalidException()
 
@@ -89,7 +95,12 @@ class AuthService(
 			throw RefreshTokenInvalidException()
 		}
 
-		val newRefreshToken = refreshTokenService.rotate(refreshToken, accountId)
+		val newRefreshToken = refreshTokenService.rotate(
+			refreshToken,
+			accountId,
+			fallbackPlatform = SessionDevice.resolvePlatform(clientPlatformHeader, userAgent),
+			fallbackDevice = SessionDevice.summarize(userAgent)
+		)
 		val accessToken = jwtService.generateAccessToken(
 			accountId = requireNotNull(account.id),
 			username = account.username,
@@ -176,10 +187,47 @@ class AuthService(
 		refreshTokenService.revokeAllForAccount(accountId)
 	}
 
-	private fun buildLoginResponse(account: Account): Pair<LoginResponse, String> {
+	/**
+	 * Every live "Faol sessiyalar" row for [accountId], most-recently-active first. [currentSessionId]
+	 * is the already-hashed id of the token the CALLING request itself authenticated with (see
+	 * [uz.safecity.transportobserver.auth.controller.AuthController.getSessions]) — `null` when the
+	 * caller supplied no resolvable token (still a valid call: it just means every row's [SessionDto.current]
+	 * comes back `false`), used only to mark [SessionDto.current], never to filter the list.
+	 */
+	fun listSessions(accountId: UUID, currentSessionId: String?): List<SessionDto> =
+		refreshTokenService.listSessions(accountId)
+			.sortedByDescending { it.lastUsedAt }
+			.map { info ->
+				val sessionId = RefreshTokenService.hashSessionId(info.token)
+				SessionDto(
+					id = sessionId,
+					platform = info.platform,
+					device = info.device,
+					createdAt = info.createdAt,
+					lastUsedAt = info.lastUsedAt,
+					current = currentSessionId != null && currentSessionId == sessionId
+				)
+			}
+
+	/**
+	 * Revokes one of [accountId]'s own sessions. [sessionId] not resolving within [accountId]'s
+	 * own token set — whether it never existed or belongs to a DIFFERENT account — surfaces
+	 * identically as [ResourceNotFoundException], never a 403, so a caller probing ids can't tell
+	 * the two cases apart. See [RefreshTokenService.revokeSessionForAccount] kdoc.
+	 */
+	fun revokeSession(accountId: UUID, sessionId: String) {
+		val revoked = refreshTokenService.revokeSessionForAccount(accountId, sessionId)
+		if (!revoked) throw ResourceNotFoundException("error.auth.session-not-found")
+	}
+
+	private fun buildLoginResponse(account: Account, clientPlatformHeader: String?, userAgent: String?): Pair<LoginResponse, String> {
 		val accountId = requireNotNull(account.id)
 		val accessToken = jwtService.generateAccessToken(accountId, account.username, account.role.name)
-		val refreshToken = refreshTokenService.issue(accountId)
+		val refreshToken = refreshTokenService.issue(
+			accountId,
+			platform = SessionDevice.resolvePlatform(clientPlatformHeader, userAgent),
+			device = SessionDevice.summarize(userAgent)
+		)
 
 		val response = LoginResponse(
 			accessToken = accessToken,

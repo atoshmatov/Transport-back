@@ -3,6 +3,7 @@ package uz.safecity.transportobserver.auth.dto
 import uz.safecity.transportobserver.auth.entity.RoleType
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import java.time.Instant
 import java.util.UUID
 
 data class LoginRequest(
@@ -90,6 +91,33 @@ data class CreateAccountRequest(
 	val role: RoleType,
 
 	val employeeId: UUID? = null
+)
+
+/**
+ * One row in the "Faol sessiyalar" (Active Sessions) list — Profile > Faoliyat tab in the web
+ * admin panel.
+ *
+ * [id] is a one-way hash of the underlying refresh token (see
+ * [uz.safecity.transportobserver.auth.security.RefreshTokenService.hashSessionId] kdoc) — the raw
+ * token itself is the bearer credential for `/auth/refresh` and must never appear in a response
+ * body, so this opaque id is what `DELETE /api/v1/auth/sessions/{id}` takes instead.
+ *
+ * [current] marks whether THIS session is the one the calling request itself authenticated with,
+ * so the frontend can hide/disable the "Chiqarish" (sign-out) action for it. This is computed
+ * server-side from the actual cookie/header-supplied token on the request
+ * ([uz.safecity.transportobserver.auth.controller.AuthController.getSessions]) — never guessed or
+ * defaulted — because getting it wrong would let a user accidentally revoke the very session
+ * they're using right now.
+ */
+data class SessionDto(
+	val id: String,
+	/** One of "WEB", "ANDROID", "IOS", "MOBILE" — see [uz.safecity.transportobserver.auth.security.SessionDevice.resolvePlatform]. */
+	val platform: String,
+	/** Short "Browser · OS" style label, or null when the User-Agent was missing/unparseable. */
+	val device: String?,
+	val createdAt: Instant,
+	val lastUsedAt: Instant,
+	val current: Boolean
 )
 
 data class AccountSummary(
